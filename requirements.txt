@@ -1,0 +1,6 @@
+fastapi==0.115.0
+motor==3.6.1
+pymongo==4.9.2
+python-jose[cryptography]==3.3.0
+landingai-ade>=1.4.0
+litellm>=1.74.0
