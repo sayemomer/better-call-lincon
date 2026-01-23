@@ -13,7 +13,7 @@ async def get_current_user(
 
     if creds is None or creds.scheme.lower() != "bearer":
         raise HTTPException(status_code=401,detail="Missing access token")
-
+        
     try:
         payload = decode_access_token(creds.credentials)
         user_id = payload.get("sub")
@@ -30,6 +30,8 @@ async def get_current_user(
 
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    
 
     return {
         "id": str(user["_id"]),
