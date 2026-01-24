@@ -1,5 +1,7 @@
 import os
-from datetime import datetime, timezone
+import asyncio
+import logging
+from datetime import datetime, timezone, date
 from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Request, Depends
 from bson import ObjectId
 from typing import List
@@ -7,7 +9,10 @@ from app.db import get_db
 from app.auth.deps import get_current_user
 from app.ai.immigration_agent import run_immigration_extraction_crew
 from app.utils.document_recommendations import get_recommended_documents, detect_permit_type_from_documents
+from app.utils.crs_requirements import analyze_crs_requirements, get_required_documents_for_crs
 from models.document import DocumentOut, RecommendedDocument, document_entity
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["documents"])
 
@@ -16,11 +21,15 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 async def process_document_extraction(app, document_id: str):
     """Background task to extract profile data from uploaded document"""
+    logger.info(f"Starting document extraction for document_id: {document_id}")
+    
     if not ObjectId.is_valid(document_id):
+        logger.error(f"Invalid document_id: {document_id}")
         return
 
     client = getattr(app.state, "mongo_client", None)
     if client is None:
+        logger.error("MongoDB client not available")
         return
 
     db_name = getattr(app.state, "db_name", "fastapi_crud")
@@ -28,23 +37,71 @@ async def process_document_extraction(app, document_id: str):
 
     document = await db.documents.find_one({"_id": ObjectId(document_id)})
     if not document:
+        logger.error(f"Document not found: {document_id}")
         return
 
     try:
         file_path = document["storage_url"]
+        logger.info(f"Processing document: {file_path}")
         
-        # Extract data from document
-        extraction_result = run_immigration_extraction_crew(file_path)
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            await db.documents.update_one(
+                {"_id": ObjectId(document_id)},
+                {"$set": {"type_detected": "unknown", "processing_error": "File not found"}}
+            )
+            return
+        
+        # Extract data from document - run blocking operation in thread pool
+        loop = asyncio.get_running_loop()
+        logger.info("Calling immigration extraction crew (this may take 30-60 seconds)...")
+        extraction_result = await loop.run_in_executor(None, run_immigration_extraction_crew, file_path)
+        logger.info(f"Extraction completed. Status: {extraction_result.get('status')}, Document type: {extraction_result.get('document_type')}")
         
         if extraction_result.get("status") in ["completed", "partial"]:
             fields = extraction_result.get("fields", {})
             document_type = extraction_result.get("document_type", "unknown")
+            
+            # If document_type is unknown, try to infer from extracted fields
+            if document_type == "unknown" or not document_type:
+                # Check for language test type
+                lang_test_type = fields.get("language_test_type")
+                if lang_test_type:
+                    lang_test_type_lower = lang_test_type.lower()
+                    if "ielts" in lang_test_type_lower:
+                        document_type = "ielts"
+                    elif "celpip" in lang_test_type_lower:
+                        document_type = "celpip"
+                    elif "pte" in lang_test_type_lower:
+                        document_type = "pte_core"
+                    elif "tef" in lang_test_type_lower:
+                        document_type = "tef_canada"
+                    elif "tcf" in lang_test_type_lower:
+                        document_type = "tcf_canada"
+                    else:
+                        document_type = "language_test"
+                    logger.info(f"Inferred document type from language_test_type: {document_type}")
+                
+                # Check for education fields
+                elif fields.get("education_level") or fields.get("education_level_detail"):
+                    document_type = "degree"  # Default to degree if education found
+                    logger.info(f"Inferred document type from education fields: {document_type}")
+                
+                # Check for work experience fields
+                elif fields.get("canadian_work_years") is not None or fields.get("foreign_work_years") is not None:
+                    document_type = "work_reference"
+                    logger.info(f"Inferred document type from work fields: {document_type}")
+            
+            logger.info(f"Document type detected: {document_type}")
+            logger.info(f"Extracted fields: {list(fields.keys())}")
             
             # Update document with detected type
             await db.documents.update_one(
                 {"_id": ObjectId(document_id)},
                 {"$set": {"type_detected": document_type}}
             )
+            logger.info(f"Updated document {document_id} with type: {document_type}")
             
             # Update profile with extracted data
             user_id = document["user_id"]
@@ -52,7 +109,10 @@ async def process_document_extraction(app, document_id: str):
             
             if profile:
                 update_data = {}
-                profile_data_dict = profile.get("data", {})  # For backend CRS structure
+                # Get existing profile.data or create new dict
+                profile_data_dict = profile.get("data") or {}
+                if not isinstance(profile_data_dict, dict):
+                    profile_data_dict = {}
                 
                 # Update basic fields (use datetime for MongoDB; BSON doesn't support date)
                 if fields.get("dob"):
@@ -111,6 +171,26 @@ async def process_document_extraction(app, document_id: str):
                         if val is not None:
                             lang_scores[skill] = val
                     profile_data_dict["language_scores"] = lang_scores
+                    
+                    # Also update legacy language_json field for backward compatibility
+                    legacy_lang = {
+                        "test_type": fields.get("language_test_type"),
+                        "speaking": fields.get("language_speaking"),
+                        "listening": fields.get("language_listening"),
+                        "reading": fields.get("language_reading"),
+                        "writing": fields.get("language_writing"),
+                    }
+                    # Remove None values
+                    legacy_lang = {k: v for k, v in legacy_lang.items() if v is not None}
+                    if legacy_lang:
+                        existing_lang_json = profile.get("language_json") or {}
+                        if isinstance(existing_lang_json, dict):
+                            existing_lang_json.update(legacy_lang)
+                            update_data["language_json"] = existing_lang_json
+                        else:
+                            update_data["language_json"] = legacy_lang
+                        logger.info(f"Updated legacy language_json: {legacy_lang}")
+                        logger.info(f"Setting update_data['language_json'] = {update_data.get('language_json')}")
                 
                 # Second language
                 if fields.get("second_language_test_type") or any(fields.get(f"second_language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
@@ -167,7 +247,8 @@ async def process_document_extraction(app, document_id: str):
                     else:
                         update_data["education_json"] = fields["education"]
                 
-                if fields.get("language_tests"):
+                # Legacy language_json field - update if we have language_tests (from OCR tool) OR if already set above
+                if fields.get("language_tests") and "language_json" not in update_data:
                     existing_lang = profile.get("language_json") or {}
                     if isinstance(existing_lang, dict) and isinstance(fields["language_tests"], dict):
                         existing_lang.update(fields["language_tests"])
@@ -183,16 +264,32 @@ async def process_document_extraction(app, document_id: str):
                     else:
                         update_data["work_json"] = fields["work_experience"]
                 
-                # Update profile.data with CRS structure
-                if profile_data_dict:
-                    update_data["data"] = profile_data_dict
+                # Always update profile.data with CRS structure (even if empty, to ensure structure exists)
+                update_data["data"] = profile_data_dict
                 
                 if update_data:
                     update_data["updated_at"] = datetime.now(timezone.utc)
-                    await db.profiles.update_one(
+                    logger.info(f"Updating profile for user {user_id}")
+                    logger.info(f"Update data keys: {list(update_data.keys())}")
+                    logger.info(f"Profile data keys: {list(profile_data_dict.keys())}")
+                    if profile_data_dict.get("language_scores"):
+                        logger.info(f"Language scores to save: {profile_data_dict.get('language_scores')}")
+                    
+                    result = await db.profiles.update_one(
                         {"user_id": user_id},
                         {"$set": update_data}
                     )
+                    logger.info(f"Profile update result - matched: {result.matched_count}, modified: {result.modified_count}")
+                    
+                    # Verify the update
+                    updated_profile = await db.profiles.find_one({"user_id": user_id})
+                    if updated_profile:
+                        saved_lang_scores = updated_profile.get("data", {}).get("language_scores")
+                        saved_lang_json = updated_profile.get("language_json")
+                        logger.info(f"Verified - language_scores in profile.data: {saved_lang_scores}")
+                        logger.info(f"Verified - language_json in profile: {saved_lang_json}")
+                else:
+                    logger.info(f"No profile updates needed for user {user_id}")
             else:
                 # Create profile if it doesn't exist
                 profile_data = {
@@ -317,10 +414,29 @@ async def process_document_extraction(app, document_id: str):
                     profile_data["work_json"] = fields["work_experience"]
                 
                 await db.profiles.insert_one(profile_data)
+                logger.info(f"Created new profile for user {user_id}")
+        else:
+            logger.warning(f"Extraction status was not 'completed' or 'partial': {extraction_result.get('status')}")
+            # Still try to detect document type even if extraction failed
+            document_type = extraction_result.get("document_type", "unknown")
+            if document_type != "unknown":
+                await db.documents.update_one(
+                    {"_id": ObjectId(document_id)},
+                    {"$set": {"type_detected": document_type}}
+                )
+                logger.info(f"Updated document type to {document_type} despite extraction status")
         
     except Exception as e:
         # Log error but don't fail the upload
-        print(f"Error processing document {document_id}: {str(e)}")
+        logger.error(f"Error processing document {document_id}: {str(e)}", exc_info=True)
+        # Try to update document with error status
+        try:
+            await db.documents.update_one(
+                {"_id": ObjectId(document_id)},
+                {"$set": {"type_detected": "unknown", "processing_error": str(e)}}
+            )
+        except:
+            pass
 
 @router.post("/documents", response_model=DocumentOut)
 async def upload_document(
@@ -368,13 +484,41 @@ async def list_documents(
     request: Request,
     user: dict = Depends(get_current_user)
 ):
-    """Get list of all uploaded documents for the current user"""
+    """Get list of all uploaded documents for the current user (includes passport from signup)"""
     db = get_db(request)
     user_id = ObjectId(user["id"])
     
     documents = []
     async for doc in db.documents.find({"user_id": user_id}).sort("created_at", -1):
         documents.append(document_entity(doc))
+    
+    # Also check signup_jobs for passport (backward compatibility for users who signed up before document records were created)
+    signup_job = await db.signup_jobs.find_one({"user_id": user_id, "status": "completed"})
+    if signup_job and signup_job.get("file_path"):
+        # Check if passport already exists in documents
+        passport_exists = any(
+            doc.get("type_detected", "").lower() == "passport" 
+            for doc in documents
+        )
+        
+        if not passport_exists:
+            # Add passport from signup
+            file_path = signup_job["file_path"]
+            mime_type = "application/pdf"
+            if file_path.lower().endswith((".png", ".jpg", ".jpeg")):
+                ext = file_path.split('.')[-1].lower()
+                mime_type = f"image/{ext}"
+            
+            virtual_passport_doc = {
+                "_id": signup_job["_id"],
+                "user_id": user_id,
+                "filename": os.path.basename(file_path),
+                "mime_type": mime_type,
+                "storage_url": file_path,
+                "type_detected": "passport",
+                "created_at": signup_job.get("created_at", datetime.now(timezone.utc)),
+            }
+            documents.insert(0, document_entity(virtual_passport_doc))
     
     return documents
 
@@ -407,6 +551,145 @@ async def get_recommended_documents_list(
     )
     
     return recommendations
+
+@router.get("/documents/crs-status")
+async def get_crs_documents_status(
+    request: Request,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get comprehensive status of documents and CRS calculation readiness.
+    
+    Returns:
+    - uploaded_documents: List of uploaded documents
+    - required_documents: Documents needed for CRS calculation (includes passport if not uploaded)
+    - crs_requirements: Analysis of CRS field requirements
+    - can_calculate_crs: Always true - CRS can be calculated with partial data
+    - is_complete: True if all required fields are present for complete calculation
+    """
+    db = get_db(request)
+    user_id = ObjectId(user["id"])
+    
+    # Get uploaded documents from documents collection
+    uploaded_documents = []
+    uploaded_doc_types = []
+    async for doc in db.documents.find({"user_id": user_id}).sort("created_at", -1):
+        uploaded_documents.append(document_entity(doc))
+        if doc.get("type_detected"):
+            uploaded_doc_types.append(doc.get("type_detected"))
+    
+    # Also check signup_jobs for passport (in case it wasn't migrated to documents collection)
+    # This handles cases where signup was completed before we started creating document records
+    signup_job = await db.signup_jobs.find_one({"user_id": user_id, "status": "completed"})
+    if signup_job and signup_job.get("file_path"):
+        # Check if passport document already exists in documents collection
+        passport_exists = any(
+            doc.get("type_detected", "").lower() == "passport" 
+            for doc in uploaded_documents
+        )
+        
+        if not passport_exists:
+            # Add passport from signup as a virtual document entry
+            file_path = signup_job["file_path"]
+            mime_type = "application/pdf"
+            if file_path.lower().endswith((".png", ".jpg", ".jpeg")):
+                ext = file_path.split('.')[-1].lower()
+                mime_type = f"image/{ext}"
+            
+            # Create a virtual document dict that matches MongoDB document structure
+            virtual_passport_doc = {
+                "_id": signup_job["_id"],  # Use signup_job ID as document ID
+                "user_id": user_id,
+                "filename": os.path.basename(file_path),
+                "mime_type": mime_type,
+                "storage_url": file_path,
+                "type_detected": "passport",
+                "created_at": signup_job.get("created_at", datetime.now(timezone.utc)),
+            }
+            uploaded_documents.insert(0, document_entity(virtual_passport_doc))  # Add at beginning
+            uploaded_doc_types.append("passport")
+    
+    # Get profile data
+    profile = await db.profiles.find_one({"user_id": user_id})
+    profile_data = {}
+    if profile:
+        profile_data = profile.get("data", {}) or {}
+        # Also check root profile fields (for backward compatibility)
+        if profile.get("dob") and not profile_data.get("dob"):
+            dob_val = profile.get("dob")
+            # Convert to ISO string format
+            if isinstance(dob_val, datetime):
+                profile_data["dob"] = dob_val.date().isoformat()
+            elif isinstance(dob_val, date):
+                profile_data["dob"] = dob_val.isoformat()
+            else:
+                profile_data["dob"] = str(dob_val)
+        
+        # Marital status - default to "single" if null/empty
+        if not profile_data.get("marital_status") and profile.get("marital_status"):
+            profile_data["marital_status"] = profile.get("marital_status")
+        elif not profile_data.get("marital_status"):
+            # Default to single if not provided (passport doesn't show marriage = unmarried)
+            profile_data["marital_status"] = "single"
+        
+        # Calculate age from DOB if age is not provided
+        if not profile_data.get("age") and profile_data.get("dob"):
+            try:
+                dob_str = profile_data["dob"]
+                if isinstance(dob_str, str):
+                    # Try ISO format first
+                    try:
+                        dob_date = datetime.fromisoformat(dob_str.replace("Z", "+00:00")).date()
+                    except:
+                        # Try YYYY-MM-DD format
+                        dob_date = datetime.strptime(dob_str, "%Y-%m-%d").date()
+                elif isinstance(dob_str, datetime):
+                    dob_date = dob_str.date()
+                elif isinstance(dob_str, date):
+                    dob_date = dob_str
+                else:
+                    dob_date = None
+                
+                if dob_date:
+                    today = date.today()
+                    age_calculated = today.year - dob_date.year - ((today.month, today.day) < (dob_date.month, dob_date.day))
+                    if age_calculated > 0 and age_calculated < 120:
+                        profile_data["age"] = age_calculated
+            except Exception:
+                pass
+    
+    # Analyze CRS requirements
+    crs_analysis = analyze_crs_requirements(profile_data)
+    
+    # Get required documents for CRS
+    required_docs = get_required_documents_for_crs(profile_data, uploaded_doc_types)
+    
+    return {
+        "uploaded_documents": uploaded_documents,
+        "uploaded_count": len(uploaded_documents),
+        "required_documents": required_docs,
+        "required_count": len(required_docs),
+        "crs_requirements": {
+            "can_calculate": crs_analysis["can_calculate"],
+            "is_complete": crs_analysis.get("is_complete", False),
+            "available_fields": crs_analysis["available_fields"],
+            "missing_required": crs_analysis["missing_required"],
+            "missing_optional": crs_analysis["missing_optional"],
+            "field_details": crs_analysis["requirements"],
+        },
+        "can_calculate_crs": crs_analysis["can_calculate"],  # Always true - calculator works with partial data
+        "is_complete": crs_analysis.get("is_complete", False),  # True if all required fields present
+        "completion_percentage": _calculate_completion_percentage(crs_analysis),
+    }
+
+def _calculate_completion_percentage(analysis: dict) -> int:
+    """Calculate completion percentage for CRS calculation"""
+    total_fields = len(analysis["requirements"])
+    if total_fields == 0:
+        return 0
+    
+    available_count = len(analysis["available_fields"])
+    return int((available_count / total_fields) * 100)
 
 @router.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(

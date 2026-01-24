@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime, timezone, timedelta, date
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, Request, HTTPException, Response, Body
 from bson import ObjectId
 from pydantic import BaseModel, EmailStr, Field
@@ -254,6 +255,25 @@ async def finalize_signup(
             "updated_at": now,
         }}
     )
+    
+    # Create a document record for the passport used during signup
+    # This allows it to show up in the documents list and CRS status
+    if job.get("file_path"):
+        file_path = job["file_path"]
+        # Try to determine mime type from file extension
+        mime_type = "application/pdf"
+        if file_path.lower().endswith((".png", ".jpg", ".jpeg")):
+            mime_type = f"image/{file_path.split('.')[-1].lower()}"
+        
+        passport_document = {
+            "user_id": user_id_obj,
+            "filename": os.path.basename(file_path),
+            "mime_type": mime_type,
+            "storage_url": file_path,
+            "type_detected": "passport",  # We know it's a passport from signup validation
+            "created_at": now,
+        }
+        await db.documents.insert_one(passport_document)
     
     # Helper function to parse date strings and convert to datetime for MongoDB
     def parse_date_str(date_str):

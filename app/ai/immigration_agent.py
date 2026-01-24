@@ -34,7 +34,7 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
         ),
         tools=[landingai_ocr_extract_immigration_fields],
         llm=llm,
-        verbose=False,
+        verbose=True,  # Enable verbose to see CrewAI logs
     )
 
     task = Task(
@@ -58,11 +58,24 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
             "   - Booleans: Convert 'true'/'false' strings to boolean\n"
             "   - Numeric: Ensure years and language scores are numbers\n"
             "   - Test types: Normalize to lowercase (ielts, celpip, pte_core, tef_canada, tcf_canada)\n"
-            "4) Identify document_type from content if not extracted\n"
+            "4) Identify document_type from content. Common types:\n"
+            "   - passport: Contains passport number, MRZ, issuing country, biometric photo\n"
+            "   - ielts: Contains 'IELTS', 'International English Language Testing System', test scores, TRF number\n"
+            "   - celpip: Contains 'CELPIP', 'Canadian English Language Proficiency Index Program', test scores\n"
+            "   - pte_core: Contains 'PTE Core', 'Pearson Test of English', test scores\n"
+            "   - tef_canada: Contains 'TEF Canada', 'Test d'évaluation de français', test scores\n"
+            "   - tcf_canada: Contains 'TCF Canada', 'Test de connaissance du français', test scores\n"
+            "   - language_test: Generic language test if specific type unclear\n"
+            "   - degree: University degree, diploma, graduation certificate\n"
+            "   - transcript: Academic transcript, marksheet\n"
+            "   - study_permit: Canadian study permit document\n"
+            "   - work_permit: Canadian work permit document\n"
+            "   - work_reference: Employment letter, work experience certificate\n"
+            "   - other: If document type cannot be determined\n"
             "5) Output STRICT JSON ONLY with double quotes:\n"
             '{\n'
             '  "status": "completed" or "partial",\n'
-            '  "document_type": "passport|study_permit|work_permit|degree|language_test|work_reference|other",\n'
+            '  "document_type": "passport|ielts|celpip|pte_core|tef_canada|tcf_canada|language_test|study_permit|work_permit|degree|transcript|work_reference|other",\n'
             '  "fields": {\n'
             '    "dob": "YYYY-MM-DD" or null,\n'
             '    "marital_status": "single|married|common_law|divorced|separated|widowed|annulled" or null,\n'

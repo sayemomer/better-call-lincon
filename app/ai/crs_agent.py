@@ -476,13 +476,36 @@ def profile_to_crs_input(data: dict[str, Any]) -> CRSInput:
     if age_val <= 0 and data.get("dob"):
         try:
             d = data["dob"]
+            # Handle various date formats
             if isinstance(d, str):
-                d = datetime.fromisoformat(d.replace("Z", "+00:00")).date()
+                # Try ISO format first
+                try:
+                    d = datetime.fromisoformat(d.replace("Z", "+00:00")).date()
+                except:
+                    # Try YYYY-MM-DD format
+                    try:
+                        d = datetime.strptime(d, "%Y-%m-%d").date()
+                    except:
+                        # Try other common formats
+                        for fmt in ["%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y", "%m-%d-%Y"]:
+                            try:
+                                d = datetime.strptime(d, fmt).date()
+                                break
+                            except:
+                                continue
             elif isinstance(d, datetime):
                 d = d.date()
-            if isinstance(d, date):
+            elif isinstance(d, date):
+                pass  # Already a date
+            else:
+                d = None
+            
+            if d and isinstance(d, date):
                 today = date.today()
                 age_val = today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+                # Validate age is reasonable
+                if age_val < 0 or age_val > 120:
+                    age_val = 0
         except Exception:
             pass
 
@@ -490,9 +513,14 @@ def profile_to_crs_input(data: dict[str, Any]) -> CRSInput:
     if isinstance(s2lang, list) and s2lang:
         s2lang = s2lang[0]
 
+    # Default marital_status to "single" if null/empty (passport doesn't show marriage = unmarried)
+    marital_status_val = data.get("marital_status") or data.get("maritalStatus")
+    if not marital_status_val or marital_status_val.lower() in ("null", "none", ""):
+        marital_status_val = "single"
+    
     return CRSInput(
         age=age_val,
-        marital_status=_str(data.get("marital_status") or data.get("maritalStatus") or "single"),
+        marital_status=_str(marital_status_val),
         spouse_accompanying=_bool(data.get("spouse_accompanying") or data.get("spouseAccompanying")),
         spouse_canadian_pr=_bool(data.get("spouse_canadian_pr") or data.get("spouseCanadianPr")),
         education_level=_str(data.get("education_level") or data.get("educationLevel")),
