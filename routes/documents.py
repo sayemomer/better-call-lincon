@@ -52,17 +52,21 @@ async def process_document_extraction(app, document_id: str):
             
             if profile:
                 update_data = {}
+                profile_data_dict = profile.get("data", {})  # For backend CRS structure
                 
                 # Update basic fields (use datetime for MongoDB; BSON doesn't support date)
                 if fields.get("dob"):
                     try:
                         d = datetime.fromisoformat(fields["dob"]).date()
                         update_data["dob"] = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+                        # Also add to profile.data for CRS
+                        profile_data_dict["dob"] = fields["dob"]
                     except Exception:
                         pass
                 
                 if fields.get("citizenship"):
                     update_data["citizenship"] = fields["citizenship"]
+                    profile_data_dict["citizenship"] = fields["citizenship"]
                 
                 if fields.get("province"):
                     update_data["province"] = fields["province"]
@@ -77,7 +81,84 @@ async def process_document_extraction(app, document_id: str):
                     except Exception:
                         pass
                 
-                # Update JSON fields (merge with existing if present)
+                # CRS-specific fields -> profile.data
+                if fields.get("marital_status"):
+                    profile_data_dict["marital_status"] = fields["marital_status"]
+                
+                if fields.get("spouse_accompanying") is not None:
+                    profile_data_dict["spouse_accompanying"] = fields["spouse_accompanying"]
+                
+                if fields.get("spouse_canadian_pr") is not None:
+                    profile_data_dict["spouse_canadian_pr"] = fields["spouse_canadian_pr"]
+                
+                # Education CRS fields
+                if fields.get("education_level"):
+                    profile_data_dict["education_level"] = fields["education_level"]
+                
+                if fields.get("education_level_detail"):
+                    profile_data_dict["education_level_detail"] = fields["education_level_detail"]
+                
+                if fields.get("canadian_education") is not None:
+                    profile_data_dict["canadian_education"] = fields["canadian_education"]
+                
+                # Language CRS fields - structure as language_scores
+                if fields.get("language_test_type") or any(fields.get(f"language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    lang_scores = profile_data_dict.get("language_scores", {})
+                    if fields.get("language_test_type"):
+                        lang_scores["test"] = fields["language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"language_{skill}")
+                        if val is not None:
+                            lang_scores[skill] = val
+                    profile_data_dict["language_scores"] = lang_scores
+                
+                # Second language
+                if fields.get("second_language_test_type") or any(fields.get(f"second_language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    s2lang = profile_data_dict.get("second_language_scores", {})
+                    if fields.get("second_language_test_type"):
+                        s2lang["test"] = fields["second_language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"second_language_{skill}")
+                        if val is not None:
+                            s2lang[skill] = val
+                    profile_data_dict["second_language_scores"] = s2lang
+                    profile_data_dict["has_second_language"] = True
+                
+                # Work experience CRS fields
+                if fields.get("canadian_work_years") is not None:
+                    profile_data_dict["canadian_work_years"] = int(fields["canadian_work_years"])
+                
+                if fields.get("foreign_work_years") is not None:
+                    profile_data_dict["foreign_work_years"] = int(fields["foreign_work_years"])
+                
+                # Additional CRS factors
+                if fields.get("certificate_of_qualification") is not None:
+                    profile_data_dict["certificate_of_qualification"] = fields["certificate_of_qualification"]
+                
+                if fields.get("provincial_nomination") is not None:
+                    profile_data_dict["provincial_nomination"] = fields["provincial_nomination"]
+                
+                if fields.get("sibling_in_canada") is not None:
+                    profile_data_dict["sibling_in_canada"] = fields["sibling_in_canada"]
+                
+                # Spouse CRS fields
+                if fields.get("spouse_education_level"):
+                    profile_data_dict["spouse_education_level"] = fields["spouse_education_level"]
+                
+                if fields.get("spouse_canadian_work_years") is not None:
+                    profile_data_dict["spouse_canadian_work_years"] = int(fields["spouse_canadian_work_years"])
+                
+                if fields.get("spouse_language_test_type") or any(fields.get(f"spouse_language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    spouse_lang = profile_data_dict.get("spouse_language_scores", {})
+                    if fields.get("spouse_language_test_type"):
+                        spouse_lang["test"] = fields["spouse_language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"spouse_language_{skill}")
+                        if val is not None:
+                            spouse_lang[skill] = val
+                    profile_data_dict["spouse_language_scores"] = spouse_lang
+                
+                # Legacy JSON fields (merge with existing if present) - for backward compatibility
                 if fields.get("education"):
                     existing_edu = profile.get("education_json") or {}
                     if isinstance(existing_edu, dict) and isinstance(fields["education"], dict):
@@ -102,17 +183,16 @@ async def process_document_extraction(app, document_id: str):
                     else:
                         update_data["work_json"] = fields["work_experience"]
                 
+                # Update profile.data with CRS structure
+                if profile_data_dict:
+                    update_data["data"] = profile_data_dict
+                
                 if update_data:
                     update_data["updated_at"] = datetime.now(timezone.utc)
-
-                    print("update_data", update_data)
-
-
-                    x =await db.profiles.update_one(
+                    await db.profiles.update_one(
                         {"user_id": user_id},
                         {"$set": update_data}
                     )
-                    print("x", x)
             else:
                 # Create profile if it doesn't exist
                 profile_data = {
@@ -120,18 +200,21 @@ async def process_document_extraction(app, document_id: str):
                     "status": "incomplete",
                     "created_at": datetime.now(timezone.utc),
                     "updated_at": datetime.now(timezone.utc),
+                    "data": {},  # CRS structure
                 }
                 
-                # Add extracted fields
+                # Add extracted fields (legacy structure)
                 if fields.get("dob"):
                     try:
                         d = datetime.fromisoformat(fields["dob"]).date()
                         profile_data["dob"] = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+                        profile_data["data"]["dob"] = fields["dob"]
                     except Exception:
                         pass
                 
                 if fields.get("citizenship"):
                     profile_data["citizenship"] = fields["citizenship"]
+                    profile_data["data"]["citizenship"] = fields["citizenship"]
                 
                 if fields.get("province"):
                     profile_data["province"] = fields["province"]
@@ -146,6 +229,84 @@ async def process_document_extraction(app, document_id: str):
                     except Exception:
                         pass
                 
+                # CRS fields -> profile.data
+                if fields.get("marital_status"):
+                    profile_data["data"]["marital_status"] = fields["marital_status"]
+                
+                if fields.get("spouse_accompanying") is not None:
+                    profile_data["data"]["spouse_accompanying"] = fields["spouse_accompanying"]
+                
+                if fields.get("spouse_canadian_pr") is not None:
+                    profile_data["data"]["spouse_canadian_pr"] = fields["spouse_canadian_pr"]
+                
+                if fields.get("education_level"):
+                    profile_data["data"]["education_level"] = fields["education_level"]
+                
+                if fields.get("education_level_detail"):
+                    profile_data["data"]["education_level_detail"] = fields["education_level_detail"]
+                
+                if fields.get("canadian_education") is not None:
+                    profile_data["data"]["canadian_education"] = fields["canadian_education"]
+                
+                # Language scores
+                if fields.get("language_test_type") or any(fields.get(f"language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    lang_scores = {}
+                    if fields.get("language_test_type"):
+                        lang_scores["test"] = fields["language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"language_{skill}")
+                        if val is not None:
+                            lang_scores[skill] = val
+                    if lang_scores:
+                        profile_data["data"]["language_scores"] = lang_scores
+                
+                # Second language
+                if fields.get("second_language_test_type") or any(fields.get(f"second_language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    s2lang = {}
+                    if fields.get("second_language_test_type"):
+                        s2lang["test"] = fields["second_language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"second_language_{skill}")
+                        if val is not None:
+                            s2lang[skill] = val
+                    if s2lang:
+                        profile_data["data"]["second_language_scores"] = s2lang
+                        profile_data["data"]["has_second_language"] = True
+                
+                if fields.get("canadian_work_years") is not None:
+                    profile_data["data"]["canadian_work_years"] = int(fields["canadian_work_years"])
+                
+                if fields.get("foreign_work_years") is not None:
+                    profile_data["data"]["foreign_work_years"] = int(fields["foreign_work_years"])
+                
+                if fields.get("certificate_of_qualification") is not None:
+                    profile_data["data"]["certificate_of_qualification"] = fields["certificate_of_qualification"]
+                
+                if fields.get("provincial_nomination") is not None:
+                    profile_data["data"]["provincial_nomination"] = fields["provincial_nomination"]
+                
+                if fields.get("sibling_in_canada") is not None:
+                    profile_data["data"]["sibling_in_canada"] = fields["sibling_in_canada"]
+                
+                # Spouse fields
+                if fields.get("spouse_education_level"):
+                    profile_data["data"]["spouse_education_level"] = fields["spouse_education_level"]
+                
+                if fields.get("spouse_canadian_work_years") is not None:
+                    profile_data["data"]["spouse_canadian_work_years"] = int(fields["spouse_canadian_work_years"])
+                
+                if fields.get("spouse_language_test_type") or any(fields.get(f"spouse_language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
+                    spouse_lang = {}
+                    if fields.get("spouse_language_test_type"):
+                        spouse_lang["test"] = fields["spouse_language_test_type"]
+                    for skill in ["speaking", "listening", "reading", "writing"]:
+                        val = fields.get(f"spouse_language_{skill}")
+                        if val is not None:
+                            spouse_lang[skill] = val
+                    if spouse_lang:
+                        profile_data["data"]["spouse_language_scores"] = spouse_lang
+                
+                # Legacy JSON fields
                 if fields.get("education"):
                     profile_data["education_json"] = fields["education"]
                 

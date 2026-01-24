@@ -9,6 +9,7 @@ from routes.documents import router as documents_router
 from dotenv import load_dotenv
 import os
 from app.auth.deps import get_current_user
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
@@ -23,6 +24,14 @@ app.include_router(documents_router, prefix="/api/v1", dependencies=[Depends(get
 app.include_router(users_router, prefix="/api/v1", dependencies=[Depends(get_current_user)])
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(signup_doc_router , prefix="/api/v1")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.on_event("startup")
 async def startup_event():

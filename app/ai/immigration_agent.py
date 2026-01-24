@@ -22,29 +22,42 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
     llm = LLM(model=model, api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
 
     agent = Agent(
-        role="Immigration Document Extractor",
-        goal="Extract and validate immigration profile data from documents reliably.",
+        role="CRS Profile Data Extractor",
+        goal="Extract all data needed for Express Entry CRS (Comprehensive Ranking System) score calculation from immigration documents.",
         backstory=(
-            "You extract structured data from immigration documents (passports, permits, degrees, etc.). "
+            "You are an expert at extracting CRS-relevant data from immigration documents. "
+            "You understand that CRS scores require: age (from DOB), marital status, education level, "
+            "language test scores (IELTS/CELPIP/PTE/TEF/TCF with 4 skills), Canadian/foreign work years, "
+            "and additional factors (provincial nomination, sibling, certificate of qualification). "
             "You always call the extraction tool first, then normalize/validate its output. "
-            "You identify the document type and extract relevant fields. You never guess missing data."
+            "You identify the document type and extract CRS-relevant fields. You never guess missing data."
         ),
         tools=[landingai_ocr_extract_immigration_fields],
         llm=llm,
-        verbose=True,
+        verbose=False,
     )
 
     task = Task(
         description=(
-            f"You must extract immigration profile information from this document: {file_path}\n\n"
+            f"You must extract CRS (Comprehensive Ranking System) profile data from this document: {file_path}\n\n"
             f"CRITICAL: You MUST use this exact file_path: {file_path}\n\n"
+            "CRS requires these fields for score calculation:\n"
+            "- Basic: dob (YYYY-MM-DD), marital_status, citizenship\n"
+            "- Education: education_level, education_level_detail, canadian_education (true/false)\n"
+            "- Language: language_test_type (ielts/celpip/pte_core/tef_canada/tcf_canada), "
+            "language_speaking/listening/reading/writing (numeric scores)\n"
+            "- Work: canadian_work_years (0-5+), foreign_work_years (0-3+)\n"
+            "- Additional: certificate_of_qualification, provincial_nomination, sibling_in_canada (all true/false)\n"
+            "- Spouse (if applicable): spouse_accompanying, spouse_canadian_pr, spouse_education_level, "
+            "spouse_canadian_work_years, spouse_language_test_type, spouse_language_speaking/listening/reading/writing\n\n"
             "Steps:\n"
             "1) Call the tool landingai_ocr_extract_immigration_fields with the file_path.\n"
             "2) Read tool_output.fields to get extracted data.\n"
             "3) Normalize and validate:\n"
             "   - Dates: Ensure YYYY-MM-DD format\n"
-            "   - Strings: Strip whitespace, capitalize appropriately\n"
-            "   - JSON fields: Ensure valid JSON structure\n"
+            "   - Booleans: Convert 'true'/'false' strings to boolean\n"
+            "   - Numeric: Ensure years and language scores are numbers\n"
+            "   - Test types: Normalize to lowercase (ielts, celpip, pte_core, tef_canada, tcf_canada)\n"
             "4) Identify document_type from content if not extracted\n"
             "5) Output STRICT JSON ONLY with double quotes:\n"
             '{\n'
@@ -52,19 +65,26 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
             '  "document_type": "passport|study_permit|work_permit|degree|language_test|work_reference|other",\n'
             '  "fields": {\n'
             '    "dob": "YYYY-MM-DD" or null,\n'
-            '    "citizenship": string or null,\n'
-            '    "province": string or null,\n'
-            '    "city": string or null,\n'
-            '    "arrival_date": "YYYY-MM-DD" or null,\n'
-            '    "education": {...} or null,\n'
-            '    "language_tests": {...} or null,\n'
-            '    "work_experience": {...} or null\n'
+            '    "marital_status": "single|married|common_law|divorced|separated|widowed|annulled" or null,\n'
+            '    "education_level": "secondary|one_two_year_diploma|bachelors|masters|phd|two_or_more" or null,\n'
+            '    "education_level_detail": string or null,\n'
+            '    "canadian_education": true/false or null,\n'
+            '    "language_test_type": "ielts|celpip|pte_core|tef_canada|tcf_canada" or null,\n'
+            '    "language_speaking": number or null,\n'
+            '    "language_listening": number or null,\n'
+            '    "language_reading": number or null,\n'
+            '    "language_writing": number or null,\n'
+            '    "canadian_work_years": number or null,\n'
+            '    "foreign_work_years": number or null,\n'
+            '    "provincial_nomination": true/false or null,\n'
+            '    "sibling_in_canada": true/false or null,\n'
+            '    ... (other CRS fields as extracted)\n'
             '  },\n'
-            '  "reason": "explain what was extracted or what is missing"\n'
+            '  "reason": "explain what CRS-relevant data was extracted or what is missing"\n'
             '}\n'
             "Do not include any extra text outside JSON."
         ),
-        expected_output="A strict JSON object with status, document_type, fields, and reason.",
+        expected_output="A strict JSON object with status, document_type, fields (CRS-relevant), and reason.",
         agent=agent,
     )
 
