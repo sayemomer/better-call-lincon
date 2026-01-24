@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import logging
 from typing import Any, Dict
 from datetime import datetime, date
 
@@ -8,6 +9,52 @@ from crewai import Agent, Task, Crew, Process, LLM
 from app.ai.immigration_ocr_tool import landingai_ocr_extract_immigration_fields
 
 DATE_RE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+def extract_json_from_markdown(text: str) -> str:
+    """
+    Extract JSON from markdown code blocks.
+    Handles both ```json and ``` formats.
+    """
+    if not text:
+        return text
+    
+    text = text.strip()
+    
+    # Try to find JSON in markdown code blocks
+    # Pattern: ```json\n{...}\n``` or ```\n{...}\n```
+    # Also handle cases where there might be whitespace before/after or no newline after ```
+    code_block_pattern = r'```(?:json)?\s*\n?(.*?)\n?\s*```'
+    match = re.search(code_block_pattern, text, re.DOTALL)
+    if match:
+        extracted = match.group(1).strip()
+        # Validate it looks like JSON (starts with { or [)
+        if extracted.startswith(('{', '[')):
+            return extracted
+    
+    # If no code block found, try to find JSON object directly
+    # Look for { ... } pattern - find the outermost braces
+    # This handles nested JSON objects
+    brace_count = 0
+    start_idx = -1
+    for i, char in enumerate(text):
+        if char == '{':
+            if brace_count == 0:
+                start_idx = i
+            brace_count += 1
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0 and start_idx != -1:
+                # Found complete JSON object
+                json_candidate = text[start_idx:i+1]
+                # Quick validation: try to parse it
+                try:
+                    json.loads(json_candidate)
+                    return json_candidate
+                except:
+                    pass
+    
+    # If nothing found, return original text (might already be JSON)
+    return text
 
 def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
     """
@@ -106,15 +153,33 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
 
     raw = result.raw if hasattr(result, "raw") else str(result)
 
+    # Extract JSON from markdown code blocks if present
+    json_text = extract_json_from_markdown(raw)
+
     # Parse JSON robustly
     try:
-        data = json.loads(raw)
-    except Exception:
+        data = json.loads(json_text)
+    except json.JSONDecodeError as e:
+        # If JSON parsing fails, log and return error
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to parse JSON: {e}")
+        logger.debug(f"Extracted JSON text: {json_text[:500]}...")
+        logger.debug(f"Raw output: {raw[:500]}...")
         return {
             "status": "partial",
             "document_type": "unknown",
             "fields": {},
             "reason": "Agent returned non-JSON output",
+            "raw": raw,
+        }
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error parsing JSON: {e}")
+        return {
+            "status": "partial",
+            "document_type": "unknown",
+            "fields": {},
+            "reason": f"Error parsing agent output: {str(e)}",
             "raw": raw,
         }
 

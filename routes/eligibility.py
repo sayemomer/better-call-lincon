@@ -71,6 +71,16 @@ async def crs_compute(
             # Default to single if not provided (passport doesn't show marriage = unmarried)
             data["marital_status"] = "single"
         
+        # Education - merge from education_json if individual fields not present
+        if doc.get("education_json") and isinstance(doc.get("education_json"), dict):
+            edu_json = doc.get("education_json")
+            if not data.get("education_level") and edu_json.get("education_level"):
+                data["education_level"] = edu_json.get("education_level")
+            if not data.get("education_level_detail") and edu_json.get("education_level_detail"):
+                data["education_level_detail"] = edu_json.get("education_level_detail")
+            if data.get("canadian_education") is None and edu_json.get("canadian_education") is not None:
+                data["canadian_education"] = edu_json.get("canadian_education")
+        
         # Calculate age from DOB if age is not provided
         if not data.get("age") and data.get("dob"):
             try:

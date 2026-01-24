@@ -55,9 +55,10 @@ async def process_document_extraction(app, document_id: str):
         
         # Extract data from document - run blocking operation in thread pool
         loop = asyncio.get_running_loop()
-        logger.info("Calling immigration extraction crew (this may take 30-60 seconds)...")
         extraction_result = await loop.run_in_executor(None, run_immigration_extraction_crew, file_path)
-        logger.info(f"Extraction completed. Status: {extraction_result.get('status')}, Document type: {extraction_result.get('document_type')}")
+
+        print("extraction_result")
+        print(extraction_result)
         
         if extraction_result.get("status") in ["completed", "partial"]:
             fields = extraction_result.get("fields", {})
@@ -86,33 +87,33 @@ async def process_document_extraction(app, document_id: str):
                 # Check for education fields
                 elif fields.get("education_level") or fields.get("education_level_detail"):
                     document_type = "degree"  # Default to degree if education found
-                    logger.info(f"Inferred document type from education fields: {document_type}")
                 
                 # Check for work experience fields
                 elif fields.get("canadian_work_years") is not None or fields.get("foreign_work_years") is not None:
                     document_type = "work_reference"
-                    logger.info(f"Inferred document type from work fields: {document_type}")
-            
-            logger.info(f"Document type detected: {document_type}")
-            logger.info(f"Extracted fields: {list(fields.keys())}")
-            
-            # Update document with detected type
+        
+        
             await db.documents.update_one(
                 {"_id": ObjectId(document_id)},
                 {"$set": {"type_detected": document_type}}
             )
-            logger.info(f"Updated document {document_id} with type: {document_type}")
             
             # Update profile with extracted data
             user_id = document["user_id"]
             profile = await db.profiles.find_one({"user_id": user_id})
-            
+
             if profile:
                 update_data = {}
                 # Get existing profile.data or create new dict
                 profile_data_dict = profile.get("data") or {}
                 if not isinstance(profile_data_dict, dict):
                     profile_data_dict = {}
+                
+                # Remove legacy fields from data dict if they exist (they should be top-level on profile)
+                # education_json, language_json, work_json should not be in data
+                profile_data_dict.pop("education_json", None)
+                profile_data_dict.pop("language_json", None)
+                profile_data_dict.pop("work_json", None)
                 
                 # Update basic fields (use datetime for MongoDB; BSON doesn't support date)
                 if fields.get("dob"):
@@ -151,15 +152,28 @@ async def process_document_extraction(app, document_id: str):
                 if fields.get("spouse_canadian_pr") is not None:
                     profile_data_dict["spouse_canadian_pr"] = fields["spouse_canadian_pr"]
                 
-                # Education CRS fields
+                # Education CRS fields - store in both data (for CRS calculator) and education_json (for schema)
+                education_data = {}
                 if fields.get("education_level"):
                     profile_data_dict["education_level"] = fields["education_level"]
+                    education_data["education_level"] = fields["education_level"]
                 
                 if fields.get("education_level_detail"):
                     profile_data_dict["education_level_detail"] = fields["education_level_detail"]
+                    education_data["education_level_detail"] = fields["education_level_detail"]
                 
                 if fields.get("canadian_education") is not None:
                     profile_data_dict["canadian_education"] = fields["canadian_education"]
+                    education_data["canadian_education"] = fields["canadian_education"]
+                
+                # Store education in education_json at top level (as schema expects)
+                if education_data:
+                    existing_edu = profile.get("education_json") or {}
+                    if isinstance(existing_edu, dict):
+                        existing_edu.update(education_data)
+                        update_data["education_json"] = existing_edu
+                    else:
+                        update_data["education_json"] = education_data
                 
                 # Language CRS fields - structure as language_scores
                 if fields.get("language_test_type") or any(fields.get(f"language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
@@ -240,12 +254,21 @@ async def process_document_extraction(app, document_id: str):
                 
                 # Legacy JSON fields (merge with existing if present) - for backward compatibility
                 if fields.get("education"):
-                    existing_edu = profile.get("education_json") or {}
-                    if isinstance(existing_edu, dict) and isinstance(fields["education"], dict):
-                        existing_edu.update(fields["education"])
-                        update_data["education_json"] = existing_edu
+                    # If we already set education_json from individual fields, merge with legacy education
+                    if "education_json" in update_data and isinstance(update_data["education_json"], dict):
+                        if isinstance(fields["education"], dict):
+                            update_data["education_json"].update(fields["education"])
+                        else:
+                            # If legacy education is not a dict, replace with it
+                            update_data["education_json"] = fields["education"]
                     else:
-                        update_data["education_json"] = fields["education"]
+                        # No education_json set yet, use legacy education
+                        existing_edu = profile.get("education_json") or {}
+                        if isinstance(existing_edu, dict) and isinstance(fields["education"], dict):
+                            existing_edu.update(fields["education"])
+                            update_data["education_json"] = existing_edu
+                        else:
+                            update_data["education_json"] = fields["education"]
                 
                 # Legacy language_json field - update if we have language_tests (from OCR tool) OR if already set above
                 if fields.get("language_tests") and "language_json" not in update_data:
@@ -266,28 +289,17 @@ async def process_document_extraction(app, document_id: str):
                 
                 # Always update profile.data with CRS structure (even if empty, to ensure structure exists)
                 update_data["data"] = profile_data_dict
+
+                print("update_data")
+                print(update_data)
                 
                 if update_data:
                     update_data["updated_at"] = datetime.now(timezone.utc)
-                    logger.info(f"Updating profile for user {user_id}")
-                    logger.info(f"Update data keys: {list(update_data.keys())}")
-                    logger.info(f"Profile data keys: {list(profile_data_dict.keys())}")
-                    if profile_data_dict.get("language_scores"):
-                        logger.info(f"Language scores to save: {profile_data_dict.get('language_scores')}")
-                    
                     result = await db.profiles.update_one(
                         {"user_id": user_id},
                         {"$set": update_data}
                     )
-                    logger.info(f"Profile update result - matched: {result.matched_count}, modified: {result.modified_count}")
-                    
-                    # Verify the update
-                    updated_profile = await db.profiles.find_one({"user_id": user_id})
-                    if updated_profile:
-                        saved_lang_scores = updated_profile.get("data", {}).get("language_scores")
-                        saved_lang_json = updated_profile.get("language_json")
-                        logger.info(f"Verified - language_scores in profile.data: {saved_lang_scores}")
-                        logger.info(f"Verified - language_json in profile: {saved_lang_json}")
+
                 else:
                     logger.info(f"No profile updates needed for user {user_id}")
             else:
@@ -336,14 +348,23 @@ async def process_document_extraction(app, document_id: str):
                 if fields.get("spouse_canadian_pr") is not None:
                     profile_data["data"]["spouse_canadian_pr"] = fields["spouse_canadian_pr"]
                 
+                # Education fields - store in both data (for CRS calculator) and education_json (for schema)
+                education_data = {}
                 if fields.get("education_level"):
                     profile_data["data"]["education_level"] = fields["education_level"]
+                    education_data["education_level"] = fields["education_level"]
                 
                 if fields.get("education_level_detail"):
                     profile_data["data"]["education_level_detail"] = fields["education_level_detail"]
+                    education_data["education_level_detail"] = fields["education_level_detail"]
                 
                 if fields.get("canadian_education") is not None:
                     profile_data["data"]["canadian_education"] = fields["canadian_education"]
+                    education_data["canadian_education"] = fields["canadian_education"]
+                
+                # Store education in education_json at top level (as schema expects)
+                if education_data:
+                    profile_data["education_json"] = education_data
                 
                 # Language scores
                 if fields.get("language_test_type") or any(fields.get(f"language_{skill}") is not None for skill in ["speaking", "listening", "reading", "writing"]):
