@@ -62,6 +62,8 @@ class ImmigrationProfileSchema(BaseModel):
     province: Optional[str] = Field(None, description="Province or state")
     city: Optional[str] = Field(None, description="City")
     arrival_date: Optional[str] = Field(None, description="Date of arrival in Canada in YYYY-MM-DD format")
+    date_of_issue: Optional[str] = Field(None, description="Date of issue (passport, permit) or test date (IELTS, CELPIP, etc.) in YYYY-MM-DD format")
+    date_of_expiry: Optional[str] = Field(None, description="Date of expiry (passport, permit) or result valid until (IELTS, CELPIP, etc.; often test date + 2 years) in YYYY-MM-DD format")
     education: Optional[str] = Field(None, description="[Legacy] Educational qualifications as JSON string")
     language_tests: Optional[str] = Field(None, description="[Legacy] Language test results as JSON string")
     work_experience: Optional[str] = Field(None, description="[Legacy] Work experience details as JSON string")
@@ -168,7 +170,7 @@ def landingai_ocr_extract_immigration_fields(file_path: str) -> dict:
     fields = {}
     
     # Date fields - normalize to YYYY-MM-DD format
-    for date_field in ["dob", "arrival_date"]:
+    for date_field in ["dob", "arrival_date", "date_of_issue", "date_of_expiry"]:
         date_val = extracted_data.get(date_field)
         if date_val:
             date_val = str(date_val).strip()

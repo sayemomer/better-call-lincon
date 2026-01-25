@@ -90,6 +90,9 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
             f"CRITICAL: You MUST use this exact file_path: {file_path}\n\n"
             "CRS requires these fields for score calculation:\n"
             "- Basic: dob (YYYY-MM-DD), marital_status, citizenship\n"
+            "- For passport, study_permit, work_permit: date_of_issue (YYYY-MM-DD), date_of_expiry (YYYY-MM-DD) if present on document\n"
+            "- For language tests (ielts, celpip, pte_core, tef_canada, tcf_canada): date_of_issue = test date, "
+            "date_of_expiry = 'valid until' / result expiry if on document, else test date + 2 years (IRCC validity)\n"
             "- Education: education_level, education_level_detail, canadian_education (true/false)\n"
             "- Language: language_test_type (ielts/celpip/pte_core/tef_canada/tcf_canada), "
             "language_speaking/listening/reading/writing (numeric scores)\n"
@@ -125,6 +128,8 @@ def run_immigration_extraction_crew(file_path: str) -> Dict[str, Any]:
             '  "document_type": "passport|ielts|celpip|pte_core|tef_canada|tcf_canada|language_test|study_permit|work_permit|degree|transcript|work_reference|other",\n'
             '  "fields": {\n'
             '    "dob": "YYYY-MM-DD" or null,\n'
+            '    "date_of_issue": "YYYY-MM-DD" or null (passport, permit, language test = test date),\n'
+            '    "date_of_expiry": "YYYY-MM-DD" or null (passport, permit, language test = valid until or test+2y),\n'
             '    "marital_status": "single|married|common_law|divorced|separated|widowed|annulled" or null,\n'
             '    "education_level": "secondary|one_two_year_diploma|bachelors|masters|phd|two_or_more" or null,\n'
             '    "education_level_detail": string or null,\n'

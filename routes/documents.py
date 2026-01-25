@@ -10,7 +10,7 @@ from app.auth.deps import get_current_user
 from app.ai.immigration_agent import run_immigration_extraction_crew
 from app.utils.document_recommendations import get_recommended_documents, detect_permit_type_from_documents
 from app.utils.crs_requirements import analyze_crs_requirements, get_required_documents_for_crs
-from models.document import DocumentOut, RecommendedDocument, document_entity
+from models.document import DocumentOut, RecommendedDocument, DeadlineItem, document_entity, _format_date
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +93,22 @@ async def process_document_extraction(app, document_id: str):
                     document_type = "work_reference"
         
         
+            doc_update: dict = {"type_detected": document_type}
+            for date_field, mongo_key in [("date_of_issue", "date_of_issue"), ("date_of_expiry", "date_of_expiry")]:
+                val = fields.get(date_field)
+                if val:
+                    try:
+                        d = datetime.fromisoformat(val.replace("Z", "+00:00")).date()
+                        doc_update[mongo_key] = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+                    except Exception:
+                        try:
+                            d = datetime.strptime(val, "%Y-%m-%d").date()
+                            doc_update[mongo_key] = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+                        except Exception:
+                            pass
             await db.documents.update_one(
                 {"_id": ObjectId(document_id)},
-                {"$set": {"type_detected": document_type}}
+                {"$set": doc_update}
             )
             
             # Update profile with extracted data
@@ -573,6 +586,95 @@ async def get_recommended_documents_list(
     
     return recommendations
 
+
+def _to_date(val):
+    """Convert MongoDB date/datetime or ISO string to date."""
+    if val is None:
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, str):
+        val = val.strip()
+        if not val:
+            return None
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00")).date()
+        except Exception:
+            try:
+                return datetime.strptime(val, "%Y-%m-%d").date()
+            except Exception:
+                return None
+    return None
+
+
+@router.get("/documents/deadlines", response_model=List[DeadlineItem])
+async def get_document_deadlines(
+    request: Request,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get deadlines/expiry days for the dashboard based on uploaded documents.
+
+    Returns documents with known expiry (passport, study permit, work permit, etc.)
+    sorted by days until expiry (soonest first). Includes days_until_expiry and
+    expired flag. Passport from signup uses profile date_of_expiry when available.
+    """
+    db = get_db(request)
+    user_id = ObjectId(user["id"])
+    today = date.today()
+    profile = await db.profiles.find_one({"user_id": user_id})
+
+    items: List[dict] = []
+    seen_passport = False
+
+    async for doc in db.documents.find({"user_id": user_id}).sort("created_at", -1):
+        doc_type = (doc.get("type_detected") or "unknown").lower()
+        if doc_type == "passport":
+            seen_passport = True
+        expiry_val = doc.get("date_of_expiry")
+        expiry_d = _to_date(expiry_val)
+        if expiry_d is None:
+            continue
+        issue_val = doc.get("date_of_issue")
+        issue_str = _format_date(issue_val)
+        expiry_str = _format_date(expiry_val) or expiry_d.isoformat()
+        days = (expiry_d - today).days
+        items.append({
+            "document_id": str(doc["_id"]),
+            "filename": doc.get("filename") or os.path.basename(doc.get("storage_url") or ""),
+            "type_detected": doc.get("type_detected") or "unknown",
+            "date_of_expiry": expiry_str,
+            "date_of_issue": issue_str,
+            "days_until_expiry": days,
+            "expired": days < 0,
+        })
+
+    signup_job = await db.signup_jobs.find_one({"user_id": user_id, "status": "completed"})
+    if signup_job and signup_job.get("file_path") and not seen_passport:
+        expiry_d = None
+        issue_str = None
+        if profile:
+            expiry_d = _to_date(profile.get("date_of_expiry"))
+            issue_str = _format_date(profile.get("date_of_issue"))
+        if expiry_d is not None:
+            expiry_str = expiry_d.isoformat()
+            days = (expiry_d - today).days
+            items.append({
+                "document_id": str(signup_job["_id"]),
+                "filename": os.path.basename(signup_job["file_path"]),
+                "type_detected": "passport",
+                "date_of_expiry": expiry_str,
+                "date_of_issue": issue_str,
+                "days_until_expiry": days,
+                "expired": days < 0,
+            })
+
+    items.sort(key=lambda x: x["days_until_expiry"])
+    return [DeadlineItem(**it) for it in items]
+
+
 @router.get("/documents/crs-status")
 async def get_crs_documents_status(
     request: Request,
@@ -731,6 +833,30 @@ async def get_document(
         raise HTTPException(status_code=404, detail="Document not found")
     
     return document_entity(document)
+
+
+@router.post("/documents/{document_id}/re-extract")
+async def re_extract_document(
+    document_id: str,
+    request: Request,
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Re-run extraction on an existing document (e.g. IELTS) to populate expiry dates
+    or refresh extracted fields. Use this if a document was processed before
+    expiry extraction was added for language tests. Processing runs in background.
+    """
+    db = get_db(request)
+    user_id = ObjectId(user["id"])
+    if not ObjectId.is_valid(document_id):
+        raise HTTPException(status_code=400, detail="Invalid document ID")
+    document = await db.documents.find_one({"_id": ObjectId(document_id), "user_id": user_id})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    background.add_task(process_document_extraction, request.app, document_id)
+    return {"message": "Re-extraction queued. Document and profile will be updated when processing completes."}
+
 
 @router.delete("/documents/{document_id}")
 async def delete_document(
