@@ -17,7 +17,7 @@ def run_signup_extraction_crew(file_path: str) -> Dict[str, Any]:
     if not openrouter_api_key:
         raise RuntimeError("OPENROUTER_API_KEY is required.")
 
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+    model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
     llm = LLM(model=model, api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
 
     # Agent to validate passport and extract fields
