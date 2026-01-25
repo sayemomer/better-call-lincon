@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getChatPrompts, sendChatMessage, type PromptCategory } from "../api/chat";
 
 type Role = "user" | "assistant";
 
@@ -15,25 +16,38 @@ function uid() {
 
 export default function ChatPage() {
   const navigate = useNavigate();
-
+  const [categories, setCategories] = useState<PromptCategory[]>([]);
+  const [promptsLoading, setPromptsLoading] = useState(true);
+  const [promptsError, setPromptsError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uid(),
       role: "assistant",
-      content:
-        "Hi! Tell me your current status (student/work permit/PR) and what you need help with.",
+      content: "Choose a question from the dropdown below to get started.",
     },
   ]);
-
-  const [input, setInput] = useState("");
+  const [selectedPrompt, setSelectedPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-
+  const [chatError, setChatError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const canSend = useMemo(
-    () => input.trim().length > 0 && !loading,
-    [input, loading]
+    () => selectedPrompt.trim().length > 0 && !loading,
+    [selectedPrompt, loading]
   );
+
+  useEffect(() => {
+    let ignore = false;
+    setPromptsLoading(true);
+    setPromptsError(null);
+    getChatPrompts()
+      .then((res) => { if (!ignore) setCategories(res.categories ?? []); })
+      .catch((e) => {
+        if (!ignore) setPromptsError(e instanceof Error ? e.message : "Could not load prompts.");
+      })
+      .finally(() => { if (!ignore) setPromptsLoading(false); });
+    return () => { ignore = true; };
+  }, []);
 
   useEffect(() => {
     listRef.current?.scrollTo({
@@ -45,44 +59,40 @@ export default function ChatPage() {
   async function handleSend() {
     if (!canSend) return;
 
-    const userMessage: ChatMessage = {
-      id: uid(),
-      role: "user",
-      content: input.trim(),
-    };
+    const message = selectedPrompt.trim();
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
+    setChatError(null);
     setLoading(true);
 
-    // fake reply
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: "assistant",
-          content:
-            "Thanks! Based on your message, I recommend reviewing your document expiry dates and checking eligibility criteria.",
-        },
-      ]);
+    try {
+      const res = await sendChatMessage(message, history);
+      const userMsg: ChatMessage = { id: uid(), role: "user", content: message };
+      const assistantMsg: ChatMessage = {
+        id: uid(),
+        role: "assistant",
+        content: res.reply,
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setSelectedPrompt("");
+    } catch (e) {
+      setChatError(e instanceof Error ? e.message : "Chat request failed.");
+    } finally {
       setLoading(false);
-    }, 800);
+    }
   }
 
   return (
     <div className="min-h-screen bg-[#edf3f8] text-slate-800">
-      {/* Fixed background */}
       <div className="fixed inset-0 -z-10 bg-[#e3edf6]" />
 
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="rounded-3xl border border-blue-200/40 bg-[#f4f8fc] p-6 shadow-xl">
-
           {/* HEADER */}
           <div className="grid grid-cols-[auto,1fr,auto] items-center gap-4">
             <button
               onClick={() => navigate("/home")}
-              className="bg-blue-600 text-white hover:bg-blue-700 rounded-2xl px-4 py-2 text-sm font-semibold shadow-sm"
+              className="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
             >
               ← Back
             </button>
@@ -93,7 +103,7 @@ export default function ChatPage() {
                 Chat with Immigration AI
               </h1>
               <p className="mt-2 text-sm text-slate-600">
-                Ask about eligibility, deadlines, required documents, or next steps.
+                Select a question to ask about eligibility, CRS, deadlines, or next steps.
               </p>
             </div>
 
@@ -103,40 +113,56 @@ export default function ChatPage() {
           {/* Chat window */}
           <div
             ref={listRef}
-            className="mt-6 h-[60vh] overflow-y-auto rounded-3xl border border-blue-200/40 bg-[#edf3f8] p-4"
+            className="mt-6 h-[50vh] overflow-y-auto rounded-3xl border border-blue-200/40 bg-[#edf3f8] p-4"
           >
             <div className="space-y-3">
               {messages.map((m) => (
                 <ChatBubble key={m.id} role={m.role} content={m.content} />
               ))}
               {loading && (
-                <div className="text-xs text-slate-500">AI is thinking...</div>
+                <div className="text-sm text-slate-500">Immigration AI is thinking…</div>
               )}
             </div>
           </div>
 
-          {/* Input */}
+          {/* Prompts dropdown + Send */}
           <div className="mt-6 rounded-3xl border border-blue-200/40 bg-[#f4f8fc] p-4">
-            <div className="flex gap-3">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                rows={3}
-                placeholder="Type your message..."
-                className="flex-1 resize-none rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none focus:border-blue-500"
-              />
-
+            {promptsError && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                {promptsError}
+              </div>
+            )}
+            {chatError && (
+              <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+                {chatError}
+              </div>
+            )}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <select
+                value={selectedPrompt}
+                onChange={(e) => setSelectedPrompt(e.target.value)}
+                disabled={promptsLoading || loading}
+                className="flex-1 rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-60"
+              >
+                <option value="">Choose a question…</option>
+                {categories.map((cat) => (
+                  <optgroup key={cat.id} label={cat.name}>
+                    {(cat.prompts ?? []).map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
               <button
                 onClick={handleSend}
                 disabled={!canSend}
-                className={`bg-blue-600 text-white hover:bg-blue-700 rounded-2xl px-5 py-2 font-semibold ${
-                  !canSend ? "opacity-50 cursor-not-allowed" : ""
-                }`}
+                className="rounded-2xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Send
+                {loading ? "Sending…" : "Ask"}
               </button>
             </div>
-
             <div className="mt-3 text-xs text-slate-500">
               This tool provides informational guidance only — not legal advice.
             </div>

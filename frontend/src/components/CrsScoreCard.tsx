@@ -1,8 +1,11 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 
 type Props = {
   score: number;
   max?: number; // CRS max (default 1200)
+  extraNote?: string; // e.g. requirements message when profile is partial
+  onRecompute?: () => void;
+  recomputing?: boolean;
 };
 
 function clamp(n: number, a: number, b: number) {
@@ -32,7 +35,7 @@ function bandLabel(score: number) {
   };
 }
 
-export default function CrsScoreCard({ score, max = 1200 }: Props) {
+export default function CrsScoreCard({ score, max = 1200, extraNote, onRecompute, recomputing }: Props) {
   const s = clamp(score, 0, max);
   const pct = (s / max) * 100;
   const band = useMemo(() => bandLabel(s), [s]);
@@ -104,11 +107,28 @@ export default function CrsScoreCard({ score, max = 1200 }: Props) {
         </div>
       </div>
 
+      {extraNote && (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {extraNote}
+        </div>
+      )}
       {/* extra credibility copy */}
       <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">
         We estimate your “chance” based on your CRS range for demo purposes.
         Real Express Entry cutoffs vary by draw type and category.
       </div>
+      {onRecompute && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={onRecompute}
+            disabled={recomputing}
+            className="w-full rounded-lg border border-blue-300/60 bg-blue-100/80 px-4 py-2.5 text-sm font-semibold text-blue-800 hover:bg-blue-200/80 disabled:opacity-60 disabled:cursor-not-allowed transition"
+          >
+            {recomputing ? "Recomputing…" : "Recompute CRS score"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

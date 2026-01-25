@@ -1,16 +1,19 @@
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  uploadSignupDoc,
+  getSignupDocStatus,
+  isTerminalStatus,
+  finalizeSignup,
+  type SignupDocStatusResponse,
+} from "../api/signupDoc";
+import { setAccessToken } from "../api/auth";
+import { signIn } from "../api/authApi";
+import ExtractedSummary from "../components/ExtractedSummary";
 
 type Mode = "signin" | "signup";
 
-const SECURITY_QUESTIONS = [
-  "What is the name of your first school?",
-  "What city were you born in?",
-  "What is your favorite food?",
-  "What is your mother’s first name?",
-  "What was the name of your first pet?",
-  "What is the name of the street you grew up on?",
-];
+const POLL_INTERVAL_MS = 1500;
 
 export default function AuthPage() {
   const navigate = useNavigate();
@@ -18,50 +21,124 @@ export default function AuthPage() {
   const [mode, setMode] = useState<Mode>("signin");
   const isSignup = mode === "signup";
 
-  // common fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  // signup fields
-  const [fullName, setFullName] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [passportFile, setPassportFile] = useState<File | null>(null);
 
-  const [q1, setQ1] = useState(SECURITY_QUESTIONS[0]);
-  const [q2, setQ2] = useState(SECURITY_QUESTIONS[1]);
-  const [q3, setQ3] = useState(SECURITY_QUESTIONS[2]);
+  const [loading, setLoading] = useState(false);
+  const [signinLoading, setSigninLoading] = useState(false);
+  const [finalizeLoading, setFinalizeLoading] = useState(false);
+  const [signupError, setSignupError] = useState<string | null>(null);
+  const [signinError, setSigninError] = useState<string | null>(null);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [signupResult, setSignupResult] = useState<SignupDocStatusResponse | null>(null);
 
-  const [a1, setA1] = useState("");
-  const [a2, setA2] = useState("");
-  const [a3, setA3] = useState("");
-
-  const title = useMemo(
-    () => (isSignup ? "Create your account" : "Welcome back"),
-    [isSignup]
+  const inFinalizeStep = Boolean(
+    isSignup && signupResult && !signupResult.is_error && signupResult.status !== "failed" && signupResult.needs_email_password
   );
 
-  function handleSubmit() {
-    if (!email.trim()) return alert("Enter email");
-    if (!password.trim()) return alert("Enter password");
+  const title = useMemo(
+    () =>
+      inFinalizeStep ? "Complete your account" : isSignup ? "Create your account" : "Welcome back",
+    [isSignup, inFinalizeStep]
+  );
 
-    if (isSignup) {
-      if (!fullName.trim()) return alert("Enter full name");
-      if (password.length < 6) return alert("Password must be 6+ characters");
-      if (password !== confirmPassword) return alert("Passwords do not match");
-      if (!passportFile) return alert("Please upload your passport (PDF or image).");
-      if (!a1.trim() || !a2.trim() || !a3.trim())
-        return alert("Please answer all 3 security questions.");
+  async function pollUntilTerminal(jobId: string): Promise<SignupDocStatusResponse> {
+    for (;;) {
+      const data = await getSignupDocStatus(jobId);
+      if (isTerminalStatus(data.status)) return data;
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+  }
 
-      // ✅ After signup go to dashboard
-      navigate("/home");
+  async function handleSignupDoc() {
+    if (!passportFile) {
+      setSignupError("Please upload your passport (PDF or image).");
       return;
     }
+    const allowed = ["application/pdf", "image/png", "image/jpeg"];
+    if (!allowed.includes(passportFile.type)) {
+      setSignupError("Upload a PDF or PNG/JPEG image.");
+      return;
+    }
+    setSignupError(null);
+    setSignupResult(null);
+    setLoading(true);
+    try {
+      const { job_id } = await uploadSignupDoc(passportFile);
+      const result = await pollUntilTerminal(job_id);
+      setSignupResult(result);
+      if (result.is_error || result.status === "failed") {
+        setSignupError(
+          result.reason || result.error || "Document is not a valid passport or processing failed."
+        );
+      }
+    } catch (e) {
+      setSignupError(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    // ✅ Login flow (for MVP): go home directly
-    // (Later we’ll insert security-question challenge page)
-    navigate("/home");
+  async function handleFinalize() {
+    const em = email.trim();
+    const pw = password;
+    if (!em) {
+      setFinalizeError("Enter your email.");
+      return;
+    }
+    if (pw.length < 8) {
+      setFinalizeError("Password must be at least 8 characters.");
+      return;
+    }
+    if (!signupResult?.job_id) return;
+    setFinalizeError(null);
+    setFinalizeLoading(true);
+    try {
+      const res = await finalizeSignup(signupResult.job_id, em, pw);
+      setAccessToken(res.access_token);
+      navigate("/home");
+    } catch (e) {
+      setFinalizeError(e instanceof Error ? e.message : "Could not complete signup.");
+    } finally {
+      setFinalizeLoading(false);
+    }
+  }
+
+  async function handleSignIn() {
+    const em = email.trim();
+    if (!em) {
+      setSigninError("Enter your email.");
+      return;
+    }
+    if (!password) {
+      setSigninError("Enter your password.");
+      return;
+    }
+    setSigninError(null);
+    setSigninLoading(true);
+    try {
+      await signIn(em, password);
+      navigate("/home");
+    } catch (e) {
+      setSigninError(e instanceof Error ? e.message : "Sign in failed.");
+    } finally {
+      setSigninLoading(false);
+    }
+  }
+
+  function handleSubmit() {
+    if (inFinalizeStep) {
+      handleFinalize();
+      return;
+    }
+    if (isSignup) {
+      handleSignupDoc();
+      return;
+    }
+    handleSignIn();
   }
 
   return (
@@ -97,7 +174,7 @@ export default function AuthPage() {
               <FeatureCard
                 icon="⏰"
                 title="Deadline tracking"
-                desc="Expiry reminders so you don’t miss critical dates."
+                desc="Expiry reminders so you don't miss critical dates."
               />
               <FeatureCard
                 icon="📰"
@@ -137,156 +214,200 @@ export default function AuthPage() {
                   <h2 className="mt-1 text-2xl font-semibold text-slate-900">{title}</h2>
                 </div>
 
-                <div className="flex rounded-2xl border border-blue-200/40 bg-[#e6eef6] p-1 text-sm">
-                  <button
-                    onClick={() => setMode("signin")}
-                    className={`rounded-xl px-3 py-1.5 transition ${
-                      mode === "signin"
-                        ? "bg-blue-700 text-white shadow-sm"
-                        : "text-slate-700 hover:bg-blue-200/50"
-                    }`}
-                  >
-                    Sign in
-                  </button>
-                  <button
-                    onClick={() => setMode("signup")}
-                    className={`rounded-xl px-3 py-1.5 transition ${
-                      mode === "signup"
-                        ? "bg-blue-700 text-white shadow-sm"
-                        : "text-slate-700 hover:bg-blue-200/50"
-                    }`}
-                  >
-                    Sign up
-                  </button>
-                </div>
+                {!inFinalizeStep && (
+                  <div className="flex rounded-2xl border border-blue-200/40 bg-[#e6eef6] p-1 text-sm">
+                    <button
+                      onClick={() => {
+                        setMode("signin");
+                        setSignupError(null);
+                        setSigninError(null);
+                        setFinalizeError(null);
+                        setSignupResult(null);
+                      }}
+                      className={`rounded-xl px-3 py-1.5 transition ${
+                        mode === "signin"
+                          ? "bg-blue-700 text-white shadow-sm"
+                          : "text-slate-700 hover:bg-blue-200/50"
+                      }`}
+                    >
+                      Sign in
+                    </button>
+                    <button
+                      onClick={() => {
+                        setMode("signup");
+                        setSignupError(null);
+                        setSigninError(null);
+                        setFinalizeError(null);
+                        setSignupResult(null);
+                      }}
+                      className={`rounded-xl px-3 py-1.5 transition ${
+                        mode === "signup"
+                          ? "bg-blue-700 text-white shadow-sm"
+                          : "text-slate-700 hover:bg-blue-200/50"
+                      }`}
+                    >
+                      Sign up
+                    </button>
+                  </div>
+                )}
               </div>
 
               <p className="mt-3 text-sm text-slate-600">
-                {isSignup
-                  ? "Create an account to save your profile, deadlines, and documents."
-                  : "Sign in to continue to your dashboard."}
+                {inFinalizeStep
+                  ? "Create your email and password to finish signup."
+                  : isSignup
+                    ? "Upload your passport. We validate it and extract your details."
+                    : "Sign in to continue to your dashboard."}
               </p>
 
               {/* Form */}
               <div className="mt-6 space-y-4">
-                {isSignup && (
-                  <Field label="Full name">
-                    <input
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
-                      placeholder="Your full name"
-                    />
-                  </Field>
-                )}
-
-                <Field label="Email">
-                  <input
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
-                    placeholder="you@example.com"
-                  />
-                </Field>
-
-                <Field label="Password">
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
-                    placeholder="••••••••"
-                  />
-                </Field>
-
-                {isSignup && (
+                {inFinalizeStep && signupResult && (
                   <>
-                    <Field label="Confirm password">
+                    <ExtractedSummary extracted={signupResult.extracted ?? {}} />
+                    <Field label="Email">
                       <input
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        type="email"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setFinalizeError(null);
+                        }}
                         className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
-                        placeholder="••••••••"
+                        placeholder="you@example.com"
+                        autoComplete="email"
                       />
                     </Field>
+                    <Field label="Password">
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          setFinalizeError(null);
+                        }}
+                        className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
+                        placeholder="At least 8 characters"
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                    {finalizeError && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                        {finalizeError}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSubmit}
+                      disabled={finalizeLoading}
+                      className="w-full rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {finalizeLoading ? "Completing…" : "Complete signup"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSignupResult(null);
+                        setFinalizeError(null);
+                        setPassportFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                      className="w-full text-center text-sm text-slate-500 hover:text-slate-700 underline underline-offset-2"
+                    >
+                      Use a different passport
+                    </button>
+                  </>
+                )}
 
-                    {/* Passport upload */}
+                {!inFinalizeStep && !isSignup && (
+                  <>
+                    <Field label="Email">
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          setSigninError(null);
+                        }}
+                        className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
+                        placeholder="you@example.com"
+                        autoComplete="email"
+                      />
+                    </Field>
+                    <Field label="Password">
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          setSigninError(null);
+                        }}
+                        className="w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                      />
+                    </Field>
+                    {signinError && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                        {signinError}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSubmit}
+                      disabled={signinLoading}
+                      className="w-full rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {signinLoading ? "Signing in…" : "Sign in"}
+                    </button>
+                  </>
+                )}
+
+                {isSignup && !inFinalizeStep && (
+                  <>
                     <div className="rounded-2xl border border-blue-200/40 bg-[#e6eef6] p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="font-medium text-slate-900">Upload your passport</div>
                           <div className="mt-1 text-xs text-slate-600">
-                            PDF or image (MVP). Used later to prefill documents.
+                            PDF or PNG/JPEG. We validate and extract your details.
                           </div>
                         </div>
-
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                          disabled={loading}
+                          className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                         >
                           Choose file
                         </button>
-
                         <input
                           ref={fileInputRef}
                           type="file"
                           accept=".pdf,image/*"
                           className="hidden"
-                          onChange={(e) =>
-                            setPassportFile(e.target.files?.[0] ?? null)
-                          }
+                          onChange={(e) => setPassportFile(e.target.files?.[0] ?? null)}
                         />
                       </div>
-
                       <div className="mt-3 text-xs text-slate-600">
                         {passportFile ? `Selected: ${passportFile.name}` : "No file selected"}
                       </div>
                     </div>
-
-                    {/* Security questions */}
-                    <div className="rounded-2xl border border-blue-200/40 bg-[#e6eef6] p-4">
-                      <div className="font-medium text-slate-900">Security questions (3)</div>
-                      <div className="mt-1 text-xs text-slate-600">
-                        We’ll use these to verify you after login (randomly).
+                    {signupError && (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                        {signupError}
                       </div>
-
-                      <div className="mt-4 space-y-4">
-                        <SecurityBlock
-                          label="Question #1"
-                          valueQ={q1}
-                          onQ={setQ1}
-                          valueA={a1}
-                          onA={setA1}
-                        />
-                        <SecurityBlock
-                          label="Question #2"
-                          valueQ={q2}
-                          onQ={setQ2}
-                          valueA={a2}
-                          onA={setA2}
-                        />
-                        <SecurityBlock
-                          label="Question #3"
-                          valueQ={q3}
-                          onQ={setQ3}
-                          valueA={a3}
-                          onA={setA3}
-                        />
-                      </div>
-                    </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSubmit}
+                      disabled={loading}
+                      className="w-full rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {loading ? "Uploading & validating…" : "Create account"}
+                    </button>
                   </>
                 )}
-
-                {/* CTA */}
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  className="w-full rounded-2xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
-                >
-                  {isSignup ? "Create account" : "Sign in"}
-                </button>
 
                 <div className="text-center text-xs text-slate-500">
                   By continuing, you agree to the MVP demo terms.
@@ -318,46 +439,6 @@ function FeatureCard({ icon, title, desc }: { icon: string; title: string; desc:
       <div className="text-2xl">{icon}</div>
       <div className="mt-3 text-base font-semibold text-slate-900">{title}</div>
       <div className="mt-1 text-sm text-slate-600">{desc}</div>
-    </div>
-  );
-}
-
-function SecurityBlock({
-  label,
-  valueQ,
-  onQ,
-  valueA,
-  onA,
-}: {
-  label: string;
-  valueQ: string;
-  onQ: (v: string) => void;
-  valueA: string;
-  onA: (v: string) => void;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-slate-600">{label}</div>
-
-      <select
-        value={valueQ}
-        onChange={(e) => onQ(e.target.value)}
-        className="mt-2 w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none focus:border-blue-500"
-      >
-        {SECURITY_QUESTIONS.map((q) => (
-          <option key={q} value={q}>
-            {q}
-          </option>
-        ))}
-      </select>
-
-      <input
-        value={valueA}
-        onChange={(e) => onA(e.target.value)}
-        className="mt-2 w-full rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-blue-500"
-        placeholder="Your answer"
-        autoComplete="off"
-      />
     </div>
   );
 }

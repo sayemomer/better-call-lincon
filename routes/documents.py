@@ -531,7 +531,7 @@ async def list_documents(
     if signup_job and signup_job.get("file_path"):
         # Check if passport already exists in documents
         passport_exists = any(
-            doc.get("type_detected", "").lower() == "passport" 
+            (doc.get("type_detected") or "").lower() == "passport"
             for doc in documents
         )
         
@@ -707,7 +707,7 @@ async def get_crs_documents_status(
     if signup_job and signup_job.get("file_path"):
         # Check if passport document already exists in documents collection
         passport_exists = any(
-            doc.get("type_detected", "").lower() == "passport" 
+            (doc.get("type_detected") or "").lower() == "passport"
             for doc in uploaded_documents
         )
         

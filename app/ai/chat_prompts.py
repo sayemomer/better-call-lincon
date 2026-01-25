@@ -67,6 +67,15 @@ FIXED_PROMPT_CATEGORIES: list[PromptCategory] = [
             "How many days before expiry should I apply?",
         ],
     },
+    {
+        "id": "policy_updates",
+        "name": "Policy Updates",
+        "prompts": [
+            "What are the latest Canadian immigration policy updates?",
+            "Any recent IRCC policy changes?",
+            "What are the recent Express Entry or immigration news?",
+        ],
+    },
 ]
 
 

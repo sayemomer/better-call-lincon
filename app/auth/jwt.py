@@ -6,7 +6,7 @@ from jose import jwt,JWTError
 def create_access_token(subject: str) -> str:
     secret = os.getenv("JWT_SECRET","dev_secret_change_me")
     alg = os.getenv("JWT_ALG","HS256")
-    exp_min = int(os.getenv("ACCESS_TOKEN_EXPIRE_MIN","15"))
+    exp_min = int(os.getenv("ACCESS_TOKEN_EXPIRE_MIN", "60"))  # minutes; default 1h
 
     now = datetime.now(timezone.utc)
 

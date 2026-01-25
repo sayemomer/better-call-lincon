@@ -6,3 +6,4 @@ landingai-ade>=1.4.0
 litellm>=1.74.0
 crewai>=0.80.0
 duckduckgo-search>=6.0.0
+tavily-python>=0.3.0

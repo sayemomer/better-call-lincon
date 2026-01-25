@@ -16,6 +16,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 REFRESH_COOKIE_NAME = "refresh_token"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 def cookie_secure() -> bool:
     return os.getenv("COOKIE_SECURE", "false").lower() == "true"
@@ -404,7 +405,7 @@ async def finalize_signup(
         httponly=True,
         secure=cookie_secure(),
         samesite="lax",
-        path="/auth",
+        path=REFRESH_COOKIE_PATH,
         max_age=refresh_expires_days() * 24 * 60 * 60,
     )
     

@@ -16,6 +16,7 @@ from app.auth.jwt import create_access_token
 router = APIRouter(prefix="/auth",tags=["auth"])
 
 REFRESH_COOKIE_NAME = "refresh_token"
+REFRESH_COOKIE_PATH = "/api/v1/auth"
 
 def cookie_secure() -> bool:
     return os.getenv("COOKIE_SECURE", "false").lower() == "true"
@@ -60,9 +61,8 @@ async def signup(data: SignUpRequest , request: Request,response: Response):
         httponly=True,
         secure=cookie_secure(),
         samesite="lax",
-        path="/auth",
+        path=REFRESH_COOKIE_PATH,
         max_age=refresh_expires_days() * 24 * 60 * 60,
-
     )
 
     access = create_access_token(subject=user_id)
@@ -105,9 +105,8 @@ async def signin(data: SignInRequest, request: Request, response: Response):
         httponly=True,
         secure=cookie_secure(),
         samesite="lax",
-        path="/auth",
+        path=REFRESH_COOKIE_PATH,
         max_age=refresh_expires_days() * 24 * 60 * 60,
-
     )
 
     access = create_access_token(subject=user_id)
@@ -164,12 +163,13 @@ async def refresh(request: Request, response: Response):
         httponly=True,
         secure=cookie_secure(),
         samesite="lax",
-        path="/auth",
+        path=REFRESH_COOKIE_PATH,
         max_age=refresh_expires_days() * 24 * 60 * 60,
     )
 
     access = create_access_token(subject=str(session["user_id"]))
     return TokenOut(access_token=access)
+
 
 @router.post("/signout")
 async def signout(request: Request, response: Response):
@@ -184,6 +184,6 @@ async def signout(request: Request, response: Response):
             {"$set": {"revoked_at": now}}
         )
 
-    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/auth")
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH)
     return {"message": "Signed out"}
 
