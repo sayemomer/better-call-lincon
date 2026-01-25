@@ -4,3 +4,5 @@ pymongo==4.9.2
 python-jose[cryptography]==3.3.0
 landingai-ade>=1.4.0
 litellm>=1.74.0
+crewai>=0.80.0
+duckduckgo-search>=6.0.0

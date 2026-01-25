@@ -7,6 +7,7 @@ from routes.signup_doc import router as signup_doc_router
 from routes.profile import router as profile_router
 from routes.documents import router as documents_router
 from routes.eligibility import router as eligibility_router
+from routes.chat import router as chat_router
 from dotenv import load_dotenv
 import os
 from app.auth.deps import get_current_user
@@ -26,6 +27,7 @@ app.include_router(users_router, prefix="/api/v1", dependencies=[Depends(get_cur
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(signup_doc_router , prefix="/api/v1")
 app.include_router(eligibility_router, prefix="/api/v1", tags=["eligibility"])
+app.include_router(chat_router, prefix="/api/v1")
 
 
 app.add_middleware(
