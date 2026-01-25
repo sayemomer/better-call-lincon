@@ -121,7 +121,7 @@ frontend/
 ### Backend
 
 ```bash
-cd backend
+create a virtual environment and activate it
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
