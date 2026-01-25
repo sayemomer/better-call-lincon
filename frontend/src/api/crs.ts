@@ -29,11 +29,20 @@ export type CRSComputeResponse = {
 /**
  * Compute Express Entry CRS score from the user's profile.
  * Uses profile data from the backend; optional overrides supplement for this request only.
+ * 
+ * @param overrides - Optional field overrides for this calculation
+ * @param forceHardcoded - Force hardcoded calculation for deterministic results (default: true for production)
  */
 export async function computeCrs(
-  overrides?: CRSComputeOverrides | null
+  overrides?: CRSComputeOverrides | null,
+  forceHardcoded: boolean = true
 ): Promise<CRSComputeResponse> {
-  return apiFetch<CRSComputeResponse>("/api/v1/crs/compute", {
+  const url = new URL("/api/v1/crs/compute", window.location.origin);
+  if (forceHardcoded) {
+    url.searchParams.set("force_hardcoded", "true");
+  }
+  
+  return apiFetch<CRSComputeResponse>(url.pathname + url.search, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(overrides ?? {}),

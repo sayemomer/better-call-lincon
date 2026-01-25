@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 from datetime import datetime, date
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request, Query
 from bson import ObjectId
 
 from app.auth.deps import get_current_user
@@ -28,6 +28,7 @@ router = APIRouter()
 async def crs_compute(
     request: Request,
     overrides: CRSComputeOverrides | None = Body(default=None),
+    force_hardcoded: bool = Query(default=False, description="Force hardcoded calculation for deterministic results"),
     user: dict = Depends(get_current_user),
 ) -> CRSComputeResponse:
     """
@@ -131,7 +132,15 @@ async def crs_compute(
     inp = profile_to_crs_input(data)
     # Use dynamic calculator (automatically chooses hardcoded or AI)
     # Note: Calculator can work with partial data, but will show missing fields
-    result = compute_crs(inp)
+    # force_hardcoded=True ensures deterministic results (recommended for production)
+    # Default behavior now prefers hardcoded for determinism
+    result = compute_crs(inp, force_hardcoded=force_hardcoded)
+    
+    # Log which method was used for debugging
+    method = result.breakdown.get("calculation_method", "unknown")
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"CRS calculation completed: method={method}, total={result.total}, user_id={user_id}")
     
     # Add requirement analysis to breakdown
     can_calculate = crs_analysis.get("can_calculate", False)

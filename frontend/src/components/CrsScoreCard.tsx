@@ -6,6 +6,7 @@ type Props = {
   extraNote?: string; // e.g. requirements message when profile is partial
   onRecompute?: () => void;
   recomputing?: boolean;
+  breakdown?: Record<string, unknown>; // Detailed breakdown of score components
 };
 
 function clamp(n: number, a: number, b: number) {
@@ -35,7 +36,7 @@ function bandLabel(score: number) {
   };
 }
 
-export default function CrsScoreCard({ score, max = 1200, extraNote, onRecompute, recomputing }: Props) {
+export default function CrsScoreCard({ score, max = 1200, extraNote, onRecompute, recomputing, breakdown }: Props) {
   const s = clamp(score, 0, max);
   const pct = (s / max) * 100;
   const band = useMemo(() => bandLabel(s), [s]);
@@ -107,13 +108,114 @@ export default function CrsScoreCard({ score, max = 1200, extraNote, onRecompute
         </div>
       </div>
 
-      {extraNote && (
+      {/* Score Breakdown */}
+      {breakdown && (
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">Score Breakdown</h3>
+          <div className="space-y-2">
+            {/* Core Human Capital */}
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-slate-600">Core Human Capital</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Age</span>
+                  <span className="font-semibold text-slate-900">{breakdown.age as number || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Education</span>
+                  <span className="font-semibold text-slate-900">{breakdown.education as number || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">First Official Language</span>
+                  <span className="font-semibold text-slate-900">{breakdown.first_official_language as number || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Canadian Work Experience</span>
+                  <span className="font-semibold text-slate-900">{breakdown.canadian_work_experience as number || 0}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Spouse Factors */}
+            {(breakdown.spouse_factors as number || 0) > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                <div className="text-xs font-medium text-slate-600">Spouse Factors</div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-600">Spouse Points</span>
+                  <span className="font-semibold text-slate-900">{breakdown.spouse_factors as number || 0}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Skill Transferability */}
+            {(breakdown.skill_transferability as number || 0) > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                <div className="text-xs font-medium text-slate-600">Skill Transferability</div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-600">Transferability Points</span>
+                  <span className="font-semibold text-slate-900">{breakdown.skill_transferability as number || 0}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Additional Points */}
+            {((breakdown.provincial_nomination as number || 0) > 0 ||
+              (breakdown.canadian_study_bonus as number || 0) > 0 ||
+              (breakdown.sibling_in_canada as number || 0) > 0 ||
+              (breakdown.certificate_of_qualification as number || 0) > 0 ||
+              (breakdown.second_official_language as number || 0) > 0) && (
+              <div className="space-y-1.5 pt-2 border-t border-slate-200">
+                <div className="text-xs font-medium text-slate-600">Additional Points</div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {(breakdown.provincial_nomination as number || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Provincial Nomination</span>
+                      <span className="font-semibold text-slate-900">{breakdown.provincial_nomination as number || 0}</span>
+                    </div>
+                  )}
+                  {(breakdown.canadian_study_bonus as number || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Canadian Study Bonus</span>
+                      <span className="font-semibold text-slate-900">{breakdown.canadian_study_bonus as number || 0}</span>
+                    </div>
+                  )}
+                  {(breakdown.sibling_in_canada as number || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Sibling in Canada</span>
+                      <span className="font-semibold text-slate-900">{breakdown.sibling_in_canada as number || 0}</span>
+                    </div>
+                  )}
+                  {(breakdown.certificate_of_qualification as number || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Certificate of Qualification</span>
+                      <span className="font-semibold text-slate-900">{breakdown.certificate_of_qualification as number || 0}</span>
+                    </div>
+                  )}
+                  {(breakdown.second_official_language as number || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Second Official Language</span>
+                      <span className="font-semibold text-slate-900">{breakdown.second_official_language as number || 0}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Requirements status explanation - always show */}
+      {extraNote ? (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           {extraNote}
         </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          CRS calculated with minimum required fields. Upload additional documents to improve score.
+        </div>
       )}
-      {/* extra credibility copy */}
-      <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">
+      {/* Disclaimer about chance estimate */}
+      <div className="mt-4 rounded-lg border border-blue-100 bg-gradient-to-br from-blue-50 to-cyan-50 p-3 text-sm text-blue-700">
         We estimate your “chance” based on your CRS range for demo purposes.
         Real Express Entry cutoffs vary by draw type and category.
       </div>

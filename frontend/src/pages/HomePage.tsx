@@ -342,6 +342,7 @@ export default function HomePage() {
                 ) : crsData ? (
                   <CrsScoreCard
                     score={crsData.total}
+                    breakdown={crsData.breakdown}
                     extraNote={
                       (crsData.breakdown?.requirements_status as { message?: string } | undefined)?.message ?? undefined
                     }

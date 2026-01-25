@@ -35,7 +35,14 @@ def compute_crs_with_ai(inp: CRSInput, official_rules: dict[str, Any] | None = N
         raise RuntimeError("OPENROUTER_API_KEY required for AI-based CRS calculation.")
     
     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
-    llm = LLM(model=model, api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
+    # Use temperature=0 and seed for deterministic results
+    # Note: Some models may not support seed, but temperature=0 helps with determinism
+    llm = LLM(
+        model=model, 
+        api_key=openrouter_api_key, 
+        base_url="https://openrouter.ai/api/v1",
+        temperature=0.0,  # Set to 0 for deterministic outputs
+    )
     
     agent = Agent(
         role="CRS Score Calculator",

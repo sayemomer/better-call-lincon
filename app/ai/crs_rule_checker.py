@@ -109,7 +109,13 @@ def _extract_rules_summary_with_ai(page_content: str | None) -> dict[str, Any] |
         return None
     
     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
-    llm = LLM(model=model, api_key=openrouter_api_key, base_url="https://openrouter.ai/api/v1")
+    # Use temperature=0 for deterministic rule checking
+    llm = LLM(
+        model=model, 
+        api_key=openrouter_api_key, 
+        base_url="https://openrouter.ai/api/v1",
+        temperature=0.0,  # Set to 0 for deterministic outputs
+    )
     
     agent = Agent(
         role="CRS Rules Analyst",
