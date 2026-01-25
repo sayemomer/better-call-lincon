@@ -1,74 +1,26 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import SignupDocPage from "@/pages/SignupDocPage";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import AuthPage from "./pages/AuthPage";
+import HomePage from "./pages/HomePage";
+import EligibilityPage from "./pages/EligibilityPage";
+import DeadlinesPage from "./pages/DeadlinesPage";
+import UpdatesPage from "./pages/UpdatesPage";
+import DocumentsPage from "./pages/DocumentsPage";
+import ChatPage from "./pages/chatPage";
+import AboutUsPage from "./pages/AboutUsPage"; 
 
 export default function App() {
-  const [page, setPage] = useState<"signupDoc" | "signin">("signupDoc");
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-
   return (
-    <div className="min-h-screen bg-muted flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl space-y-4">
-        
-        {/* Top navigation */}
-        <div className="flex gap-2">
-          <Button
-            variant={page === "signupDoc" ? "default" : "outline"}
-            onClick={() => setPage("signupDoc")}
-          >
-            Signup via Document
-          </Button>
-
-          <Button
-            variant={page === "signin" ? "default" : "outline"}
-            onClick={() => setPage("signin")}
-          >
-            Sign in
-          </Button>
-        </div>
-
-        {/* Card container */}
-        <Card className="rounded-2xl shadow-sm">
-          <CardHeader>
-            <CardTitle>
-              {page === "signupDoc" && "Signup via Passport Document"}
-              {page === "signin" && "Sign in"}
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent>
-
-            {/* {page === "signupDoc" && (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Upload your passport document to start signup.
-                </p>
-                <Button>Upload Document</Button>
-              </div>
-            )} */}
-
-          {page === "signupDoc" && (
-          <SignupDocPage
-          onAuthed={(token) => {
-          setAccessToken(token);
-          setPage("dashboard");
-          }}
-          />
-          )}
-
-            {page === "signin" && (
-              <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Enter your email and password to sign in.
-                </p>
-                <Button>Sign in</Button>
-              </div>
-            )}
-
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<AuthPage />} />
+        <Route path="/home" element={<HomePage />} />
+        <Route path="/eligibility" element={<EligibilityPage />} />
+        <Route path="/deadlines" element={<DeadlinesPage />} />
+        <Route path="/updates" element={<UpdatesPage />} />
+        <Route path="/documents" element={<DocumentsPage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/about" element={<AboutUsPage />} /> 
+      </Routes>
+    </BrowserRouter>
   );
 }
