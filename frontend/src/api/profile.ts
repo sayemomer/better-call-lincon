@@ -45,3 +45,15 @@ export async function getProfile(): Promise<ProfileOut> {
 export async function getProfileValidate(): Promise<ProfileValidationResult> {
   return apiFetch<ProfileValidationResult>("/api/v1/profile/validate");
 }
+
+export type ProfileUpdate = Partial<ProfileOut>;
+
+export async function updateProfile(updates: ProfileUpdate): Promise<ProfileOut> {
+  return apiFetch<ProfileOut>("/api/v1/profile", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updates),
+  });
+}

@@ -43,11 +43,17 @@ async def update_profile_full(
     # Convert date strings to date objects if needed
     profile_dict = profile.dict(exclude_none=True)
     
-    # Handle date fields
-    if "dob" in profile_dict and isinstance(profile_dict["dob"], str):
-        profile_dict["dob"] = datetime.fromisoformat(profile_dict["dob"]).date()
-    if "arrival_date" in profile_dict and isinstance(profile_dict["arrival_date"], str):
-        profile_dict["arrival_date"] = datetime.fromisoformat(profile_dict["arrival_date"]).date()
+    # Handle date fields - convert string dates to date objects, handle empty strings
+    date_fields = ["dob", "arrival_date", "date_of_issue", "date_of_expiry"]
+    for field in date_fields:
+        if field in profile_dict:
+            if isinstance(profile_dict[field], str):
+                if profile_dict[field].strip():  # Only convert if not empty
+                    profile_dict[field] = datetime.fromisoformat(profile_dict[field]).date()
+                else:
+                    profile_dict[field] = None  # Set empty strings to None
+            elif profile_dict[field] is None:
+                profile_dict[field] = None  # Explicitly set None
     
     profile_dict["user_id"] = user_id
     profile_dict["updated_at"] = datetime.now(timezone.utc)
@@ -86,11 +92,17 @@ async def update_profile_partial(
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
     
-    # Handle date fields
-    if "dob" in update_data and isinstance(update_data["dob"], str):
-        update_data["dob"] = datetime.fromisoformat(update_data["dob"]).date()
-    if "arrival_date" in update_data and isinstance(update_data["arrival_date"], str):
-        update_data["arrival_date"] = datetime.fromisoformat(update_data["arrival_date"]).date()
+    # Handle date fields - convert string dates to date objects, handle empty strings
+    date_fields = ["dob", "arrival_date", "date_of_issue", "date_of_expiry"]
+    for field in date_fields:
+        if field in update_data:
+            if isinstance(update_data[field], str):
+                if update_data[field].strip():  # Only convert if not empty
+                    update_data[field] = datetime.fromisoformat(update_data[field]).date()
+                else:
+                    update_data[field] = None  # Set empty strings to None
+            elif update_data[field] is None:
+                update_data[field] = None  # Explicitly set None
     
     update_data["updated_at"] = datetime.now(timezone.utc)
     

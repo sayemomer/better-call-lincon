@@ -693,6 +693,9 @@ async def get_crs_documents_status(
     db = get_db(request)
     user_id = ObjectId(user["id"])
     
+    # Get profile first (needed for passport expiry date from signup)
+    profile = await db.profiles.find_one({"user_id": user_id})
+    
     # Get uploaded documents from documents collection
     uploaded_documents = []
     uploaded_doc_types = []
@@ -719,6 +722,13 @@ async def get_crs_documents_status(
                 ext = file_path.split('.')[-1].lower()
                 mime_type = f"image/{ext}"
             
+            # Get date_of_expiry and date_of_issue from profile
+            date_of_expiry = None
+            date_of_issue = None
+            if profile:
+                date_of_expiry = profile.get("date_of_expiry")
+                date_of_issue = profile.get("date_of_issue")
+            
             # Create a virtual document dict that matches MongoDB document structure
             virtual_passport_doc = {
                 "_id": signup_job["_id"],  # Use signup_job ID as document ID
@@ -728,12 +738,13 @@ async def get_crs_documents_status(
                 "storage_url": file_path,
                 "type_detected": "passport",
                 "created_at": signup_job.get("created_at", datetime.now(timezone.utc)),
+                "date_of_expiry": date_of_expiry,  # Include expiry date from profile
+                "date_of_issue": date_of_issue,  # Include issue date from profile
             }
             uploaded_documents.insert(0, document_entity(virtual_passport_doc))  # Add at beginning
             uploaded_doc_types.append("passport")
     
     # Get profile data
-    profile = await db.profiles.find_one({"user_id": user_id})
     profile_data = {}
     if profile:
         profile_data = profile.get("data", {}) or {}
