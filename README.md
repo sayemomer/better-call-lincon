@@ -34,7 +34,24 @@ Applicants often risk refusals due to small mistakes or outdated information.
 ⚠️ The system does **not** provide legal advice and does not submit applications to IRCC.
 
 ---
+## 📸 Screenshots
 
+### First Page
+<img width="1468" height="798" alt="Screenshot 2026-01-25 at 8 42 56 AM" src="https://github.com/user-attachments/assets/725f9917-ae78-4936-a9d2-5382acfc6a08" />
+
+### Dashboard
+<img width="1078" height="644" alt="Screenshot 2026-01-25 at 9 32 08 AM" src="https://github.com/user-attachments/assets/58fa17a7-c389-4de4-bf62-14048f496b48" />
+
+### Chat With AI
+<img width="1052" height="648" alt="Screenshot 2026-01-25 at 9 32 47 AM" src="https://github.com/user-attachments/assets/7525691e-f595-4406-9590-4a2261ed9c84" />
+
+<img width="1043" height="644" alt="Screenshot 2026-01-25 at 9 33 04 AM" src="https://github.com/user-attachments/assets/02472b2b-5fb0-45a0-ad80-55ddc82cb4e7" />
+
+### About Us
+
+<img width="1466" height="794" alt="Screenshot 2026-01-25 at 9 33 59 AM" src="https://github.com/user-attachments/assets/289567f3-1c57-4076-b762-0a69ca95e87e" />
+
+---
 ## 🏗️ Architecture Overview
 
 ### 🔹 Backend
@@ -205,6 +222,13 @@ If you're interested in supporting or collaborating:
 
 📩 Open an issue
 📧 Contact us directly
+
+Omer Sayem: https://www.linkedin.com/in/omer-sayem/
+
+Mahdieh Shekarian: https://www.linkedin.com/in/mahdieh-shekarian/
+
+Sharifa Akter: https://www.linkedin.com/in/aktersharifa/
+
 ⭐ Or simply star the repo to show support
 
 ---
@@ -213,6 +237,4 @@ If you're interested in supporting or collaborating:
 
 MIT License
 
-
-Your move 😌
 
