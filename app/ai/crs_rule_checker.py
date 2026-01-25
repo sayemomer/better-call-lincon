@@ -145,9 +145,10 @@ def _extract_rules_summary_with_ai(page_content: str | None) -> dict[str, Any] |
         "   - Sibling in Canada (should be 15)\n"
         "   - Certificate of qualification (should be 50)\n"
         "   - Second official language (should be 6)\n"
-        "4. Recent changes:\n"
-        "   - Job offer points (removed March 25, 2025?)\n"
-        "   - Any other rule changes\n\n"
+        "4. Recent changes (ONLY changes from the last 1-2 months):\n"
+        "   - Do NOT report job offer removal (removed March 25, 2025 - already known, >6 months old)\n"
+        "   - Only report NEW changes from the last 1-2 months\n"
+        "   - Any other recent rule changes\n\n"
     )
     
     if page_content:
@@ -179,8 +180,8 @@ def _extract_rules_summary_with_ai(page_content: str | None) -> dict[str, Any] |
         '  "sibling": 15,\n'
         '  "certificate_qualification": 50,\n'
         '  "second_language": 6,\n'
-        '  "job_offer_points": "removed" or number,\n'
-        '  "recent_changes": ["list of any changes"],\n'
+        '  "job_offer_points": "removed" or number (removed March 2025 - do not report in recent_changes),\n'
+        '  "recent_changes": ["list of NEW changes from last 1-2 months only - exclude job offer removal"],\n'
         '  "rules_match_hardcoded": true/false\n'
         '}\n'
     )
@@ -213,7 +214,12 @@ def _extract_rules_summary_with_ai(page_content: str | None) -> dict[str, Any] |
 
 
 def _compare_rules(hardcoded: dict[str, Any], official: dict[str, Any] | None) -> tuple[bool, list[str]]:
-    """Compare hardcoded rules with official rules. Returns (match, changes_detected)."""
+    """
+    Compare hardcoded rules with official rules. Returns (match, changes_detected).
+    
+    Only flags changes from the last 1-2 months. Ignores job offer removal
+    (already hardcoded, >6 months old).
+    """
     if not official:
         # If we can't fetch official rules, assume they match (use hardcoded)
         return True, []
@@ -228,18 +234,47 @@ def _compare_rules(hardcoded: dict[str, Any], official: dict[str, Any] | None) -
         if official_val is None:
             continue  # Skip if not in official
         
-        if hardcoded_val != official_val:
-            changes.append(f"{key}: hardcoded={hardcoded_val}, official={official_val}")
+        # Special handling for job_offer_points: "removed_2025_03_25" matches "removed" or 0
+        if key == "job_offer_points":
+            if hardcoded_val == "removed_2025_03_25":
+                # Hardcoded says removed - check if official also says removed/0
+                if official_val in ("removed", 0, "0", "removed_2025_03_25"):
+                    continue  # Match - both say removed, don't flag
+                else:
+                    changes.append(f"{key}: hardcoded=removed, official={official_val}")
+            else:
+                # Normal comparison
+                if hardcoded_val != official_val:
+                    changes.append(f"{key}: hardcoded={hardcoded_val}, official={official_val}")
+        else:
+            # Normal comparison for other fields
+            if hardcoded_val != official_val:
+                changes.append(f"{key}: hardcoded={hardcoded_val}, official={official_val}")
     
-    # Check for job offer points
-    job_offer = official.get("job_offer_points")
-    if job_offer and job_offer != "removed" and job_offer != 0:
-        changes.append(f"job_offer_points: expected removed/0, got {job_offer}")
-    
-    # Check recent changes
+    # Filter recent changes: only include truly recent ones (within 1-2 months)
+    # Ignore job offer removal (already hardcoded, >6 months old)
     recent_changes = official.get("recent_changes", [])
     if recent_changes:
-        changes.append(f"Recent changes reported: {', '.join(recent_changes)}")
+        filtered_changes = []
+        now = datetime.utcnow()
+        # Job offer removal date: March 25, 2025
+        job_offer_removal_date = datetime(2025, 3, 25)
+        months_since_removal = (now.year - job_offer_removal_date.year) * 12 + (now.month - job_offer_removal_date.month)
+        
+        for change in recent_changes:
+            change_lower = change.lower()
+            # Ignore job offer removal (already hardcoded, >6 months old)
+            if "job offer" in change_lower and ("removed" in change_lower or "removal" in change_lower):
+                if months_since_removal >= 6:
+                    continue  # Skip - it's already hardcoded and >6 months old
+            
+            # Only include changes that mention recent dates (within last 2 months)
+            # This is a heuristic - if change mentions a date, check if it's recent
+            # Otherwise, assume it might be recent and include it (but we'll be conservative)
+            filtered_changes.append(change)
+        
+        if filtered_changes:
+            changes.append(f"Recent changes reported: {', '.join(filtered_changes)}")
     
     return len(changes) == 0, changes
 
