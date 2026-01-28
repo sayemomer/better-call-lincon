@@ -137,6 +137,9 @@ async def refresh(request: Request, response: Response):
         )
         raise HTTPException(status_code=401, detail="Refresh token reuse detected. Signed out.")
 
+    #convert session["expires_at"] to utc timezone
+    session["expires_at"] = session["expires_at"].replace(tzinfo=timezone.utc)
+
     if session["expires_at"] < now:
         # expired session
         await db.sessions.update_one({"_id": session["_id"]}, {"$set": {"revoked_at": now}})
