@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getChatPrompts, sendChatMessage, type PromptCategory } from "../api/chat";
+import { sendChatMessage } from "../api/chat";
 
 type Role = "user" | "assistant";
 
@@ -16,38 +16,20 @@ function uid() {
 
 export default function ChatPage() {
   const navigate = useNavigate();
-  const [categories, setCategories] = useState<PromptCategory[]>([]);
-  const [promptsLoading, setPromptsLoading] = useState(true);
-  const [promptsError, setPromptsError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uid(),
       role: "assistant",
-      content: "Choose a question from the dropdown below to get started.",
+      content: "Type your question below to get started. Ask about eligibility, CRS, deadlines, or anything else.",
     },
   ]);
-  const [selectedPrompt, setSelectedPrompt] = useState("");
+  const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const canSend = useMemo(
-    () => selectedPrompt.trim().length > 0 && !loading,
-    [selectedPrompt, loading]
-  );
-
-  useEffect(() => {
-    let ignore = false;
-    setPromptsLoading(true);
-    setPromptsError(null);
-    getChatPrompts()
-      .then((res) => { if (!ignore) setCategories(res.categories ?? []); })
-      .catch((e) => {
-        if (!ignore) setPromptsError(e instanceof Error ? e.message : "Could not load prompts.");
-      })
-      .finally(() => { if (!ignore) setPromptsLoading(false); });
-    return () => { ignore = true; };
-  }, []);
+  const canSend = inputText.trim().length > 0 && !loading;
 
   useEffect(() => {
     listRef.current?.scrollTo({
@@ -59,10 +41,11 @@ export default function ChatPage() {
   async function handleSend() {
     if (!canSend) return;
 
-    const message = selectedPrompt.trim();
+    const message = inputText.trim();
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
     setChatError(null);
+    setInputText("");
     setLoading(true);
 
     try {
@@ -74,11 +57,17 @@ export default function ChatPage() {
         content: res.reply,
       };
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
-      setSelectedPrompt("");
     } catch (e) {
       setChatError(e instanceof Error ? e.message : "Chat request failed.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   }
 
@@ -103,7 +92,7 @@ export default function ChatPage() {
                 Chat with Immigration AI
               </h1>
               <p className="mt-2 text-sm text-slate-600">
-                Select a question to ask about eligibility, CRS, deadlines, or next steps.
+                Ask anything about eligibility, CRS, deadlines, or next steps.
               </p>
             </div>
 
@@ -125,42 +114,30 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Prompts dropdown + Send */}
+          {/* Open-ended input + Send */}
           <div className="mt-6 rounded-3xl border border-blue-200/40 bg-[#f4f8fc] p-4">
-            {promptsError && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                {promptsError}
-              </div>
-            )}
             {chatError && (
               <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
                 {chatError}
               </div>
             )}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <select
-                value={selectedPrompt}
-                onChange={(e) => setSelectedPrompt(e.target.value)}
-                disabled={promptsLoading || loading}
-                className="flex-1 rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-60"
-              >
-                <option value="">Choose a question…</option>
-                {categories.map((cat) => (
-                  <optgroup key={cat.id} label={cat.name}>
-                    {(cat.prompts ?? []).map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <textarea
+                ref={inputRef}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={loading}
+                placeholder="Type your question…"
+                rows={2}
+                className="min-h-[2.5rem] flex-1 resize-y rounded-2xl border border-blue-200/40 bg-[#edf3f8] px-4 py-3 text-sm outline-none focus:border-blue-500 disabled:opacity-60"
+              />
               <button
                 onClick={handleSend}
                 disabled={!canSend}
                 className="rounded-2xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {loading ? "Sending…" : "Ask"}
+                {loading ? "Sending…" : "Send"}
               </button>
             </div>
             <div className="mt-3 text-xs text-slate-500">
