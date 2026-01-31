@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from landingai_ade import LandingAIADE
 from crewai.tools import tool
+
+from app.ai.translation_utils import ensure_english
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import date
@@ -113,6 +115,9 @@ def landingai_ocr_extract_immigration_fields(file_path: str) -> dict:
     
     if not markdown_content:
         raise RuntimeError("No markdown extracted from document")
+    
+    # Translate to English if another language is detected (so extraction yields English fields)
+    markdown_content = ensure_english(markdown_content)
     
     # Step 2: Create JSON schema from Pydantic model
     schema_dict = ImmigrationProfileSchema.model_json_schema()
