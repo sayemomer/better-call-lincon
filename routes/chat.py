@@ -6,7 +6,9 @@ It uses web search to fetch current CRS cutoffs, draw dates, and news.
 Not legal advice.
 """
 
-from __future__ import annotations
+from typing import Any
+
+
 
 import asyncio
 import json
@@ -28,7 +30,7 @@ router = APIRouter(tags=["chat"])
 
 def _build_profile_data(doc: dict | None) -> dict:
     """Build profile data dict from DB profile (same shape as eligibility CRS)."""
-    data = dict((doc or {}).get("data", {}))
+    data = dict[Any, Any]((doc or {}).get("data", {}))
     if not doc:
         return data
 
