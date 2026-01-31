@@ -201,11 +201,13 @@ We genuinely appreciate the support that made this possible.
 
 ## 🚀 Future Improvements
 
-* Real-time IRCC policy crawler
-* Advanced CRS simulation engine
-* Multi-language support
-* Timeline prediction modeling
-* Admin dashboard for policy management
+- [ ] Finetune the AI model to improve the accuracy
+- [ ] Real-time IRCC policy crawler
+- [ ] Advanced CRS simulation engine
+- [x] Multi-language support
+- [ ] Timeline prediction modeling
+- [ ] Admin dashboard for policy management
+- [ ] Security audit
 
 ---
 
